@@ -33,8 +33,9 @@ st.set_page_config(
 # 🔄 IMPORTANT: Add your email address to access analytics
 ADMIN_EMAILS = [
     "venkkandadai@gmail.com",  # 🔄 Replace with YOUR email address
-    "medschool.dashboard.prototype@gmail.com",
+    "medschool.dashboard.prototype@gmail.com", # System email has admin access
     "kmcallister@nbme.org",    # System email has admin access
+    "rgagliardi@nbme.org",    # System email has admin access
     # Add more researcher/admin emails as needed:
     # "researcher2@university.edu",
     # "supervisor@medschool.edu",
