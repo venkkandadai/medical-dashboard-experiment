@@ -757,10 +757,13 @@ if os.path.exists(user_db_path):
     users_df = pd.read_csv(user_db_path)
    
     # Handle legacy user databases that might not have new columns
-    required_columns = ["first_name", "last_name", "title", "medical_school", "name"]
+    required_columns = ["first_name", "last_name", "title", "medical_school", "name", "nda_agreed", "nda_date", "nda_version"]
     for col in required_columns:
         if col not in users_df.columns:
-            users_df[col] = ""
+         if col == "nda_agreed":
+            users_df[col] = False  # Default to False for boolean
+        else:
+            users_df[col] = ""     # Default to empty string for others
    
     # Create full name field if it doesn't exist (for authenticator compatibility)
     if users_df["name"].fillna("").eq("").all():
