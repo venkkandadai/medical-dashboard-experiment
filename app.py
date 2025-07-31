@@ -818,6 +818,50 @@ except Exception as e:
     st.sidebar.write(f"❌ Authenticator error: {e}")
 st.sidebar.markdown("---")
 
+# --- ADDITIONAL LOGIN DEBUG ---
+st.sidebar.markdown("**🔧 TESTING LOGIN CALL**")
+
+try:
+    st.sidebar.write("About to call authenticator.login()...")
+    
+    # Try the login call and capture what it returns
+    login_result = authenticator.login(location='sidebar')
+    
+    st.sidebar.write(f"Login result type: {type(login_result)}")
+    st.sidebar.write(f"Login result: {login_result}")
+    
+    # Check session state after login call
+    st.sidebar.write(f"Auth status after login call: {st.session_state.get('authentication_status', 'Not set')}")
+    st.sidebar.write(f"Username after login call: {st.session_state.get('username', 'Not set')}")
+    st.sidebar.write(f"Name after login call: {st.session_state.get('name', 'Not set')}")
+    
+except Exception as e:
+    st.sidebar.error(f"❌ Login call failed: {e}")
+    st.sidebar.write(f"Error type: {type(e)}")
+    
+    # If login fails, show manual form as backup
+    st.sidebar.markdown("**🔧 MANUAL LOGIN BACKUP**")
+    manual_email = st.sidebar.text_input("Email (Manual)", key="manual_email")
+    manual_pwd = st.sidebar.text_input("Password (Manual)", type="password", key="manual_pwd")
+    
+    if st.sidebar.button("Manual Login"):
+        if manual_email and manual_pwd:
+            users_df = pd.read_csv(user_db_path)
+            if manual_email in users_df["email"].values:
+                user_row = users_df[users_df["email"] == manual_email].iloc[0]
+                if stauth.Hasher.verify(manual_pwd, user_row["password"]):
+                    st.session_state["authentication_status"] = True
+                    st.session_state["username"] = manual_email
+                    st.session_state["name"] = user_row.get("name", "User")
+                    st.sidebar.success("✅ Manual login successful!")
+                    st.rerun()
+                else:
+                    st.sidebar.error("❌ Wrong password")
+            else:
+                st.sidebar.error("❌ Email not found")
+
+st.sidebar.markdown("---")
+
 # Handle login - New API compatibility
 try:
     login_result = authenticator.login(location='sidebar')
