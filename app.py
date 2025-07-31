@@ -3886,7 +3886,7 @@ elif page == "🗣️ Communication Skills Analytics":
         
         # Learning Objectives Performance
         with st.container():
-            st.markdown("### 🎯 Patient Centered Behaviors - Learning Objectives Performance")
+            st.markdown("### 🎯 Patient Centered Behaviors: Learning Objectives")
             st.markdown("---")
         
         # Calculate performance by learning objective
