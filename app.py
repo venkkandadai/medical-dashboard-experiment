@@ -862,58 +862,70 @@ except Exception as e:
 
 st.sidebar.markdown("---")
 
-# Handle login - New API compatibility
-try:
-    login_result = authenticator.login(location='sidebar')
-    if login_result is not None and len(login_result) == 3:
-        name, authentication_status, username = login_result
-    else:
-        # Try accessing authentication state directly (new API)
-        name = st.session_state.get('name')
-        authentication_status = st.session_state.get('authentication_status')
-        username = st.session_state.get('username')
-except Exception as e:
-    # Fallback for API changes
-    name = st.session_state.get('name')
-    authentication_status = st.session_state.get('authentication_status')
-    username = st.session_state.get('username')
-st.session_state["authentication_status"] = authentication_status
+# --- COMPLETE WORKING AUTHENTICATION SYSTEM ---
 
-if authentication_status:
-    st.session_state["username"] = username
-    st.session_state["name"] = name
-    # Log successful login
-    log_user_action(username, "login_success", {"name": name})
-    # Log session activity
-    log_session_activity()
+# Handle login
+if auth_mode == "Login":
+    if not st.session_state.get("authentication_status", False):
+        st.sidebar.header("🔐 Login")
+        
+        with st.sidebar.form("login_form"):
+            login_email = st.text_input("Email Address")
+            login_password = st.text_input("Password", type="password")
+            login_button = st.form_submit_button("Login")
+        
+        if login_button:
+            if login_email and login_password:
+                if os.path.exists(user_db_path):
+                    users_df = pd.read_csv(user_db_path)
+                    
+                    if login_email in users_df["email"].values:
+                        user_row = users_df[users_df["email"] == login_email].iloc[0]
+                        stored_password = user_row["password"]
+                        
+                        # Use bcrypt to verify password
+                        import bcrypt
+                        try:
+                            # Try bcrypt verification (most common)
+                            if bcrypt.checkpw(login_password.encode('utf-8'), stored_password.encode('utf-8')):
+                                password_correct = True
+                            else:
+                                password_correct = False
+                        except:
+                            # Fallback: check if it's a plain hash we can verify differently
+                            test_hash = stauth.Hasher.hash(login_password)
+                            password_correct = (test_hash == stored_password)
+                        
+                        if password_correct:
+                            # Login successful
+                            st.session_state["authentication_status"] = True
+                            st.session_state["username"] = login_email
+                            st.session_state["name"] = user_row.get("name", user_row.get("first_name", "User"))
+                            
+                            # Log successful login
+                            log_user_action(login_email, "login_success", {"name": st.session_state["name"]})
+                            log_session_activity()
+                            
+                            st.sidebar.success("✅ Login successful!")
+                            st.rerun()
+                        else:
+                            st.sidebar.error("❌ Invalid password")
+                    else:
+                        st.sidebar.error("❌ Email not found")
+                else:
+                    st.sidebar.error("❌ No users found")
+            else:
+                st.sidebar.error("❌ Please enter both email and password")
 
-if authentication_status is False:
-    st.error("Username or password is incorrect")
-    st.stop()
-elif authentication_status is None:
-    st.warning("Please enter your username and password")
-    st.stop()
+# Set authentication status for the rest of the app
+authentication_status = st.session_state.get("authentication_status", False)
+username = st.session_state.get("username")
+name = st.session_state.get("name", "User")
 
 # Handle logout
 if authentication_status:
-    try:
-        logout_result = authenticator.logout(location='sidebar')
-        if logout_result or st.session_state.get('authentication_status') is False:
-            # Log session end before clearing
-            current_user = st.session_state.get("username")
-            if current_user and "session_start" in st.session_state:
-                session_end_time = time.time()
-                session_duration = session_end_time - st.session_state["session_start"]
-                log_user_action(current_user, "session_end", {
-                    "session_id": st.session_state["session_id"],
-                    "session_duration_seconds": round(session_duration, 1),
-                    "session_duration_minutes": round(session_duration / 60, 2)
-                })
-           
-            st.session_state.clear()
-            st.rerun()
-    except KeyError:
-        # Handle case where cookie doesn't exist
+    if st.sidebar.button("🚪 Logout"):
+        # Log session end
         current_user = st.session_state.get("username")
         if current_user and "session_start" in st.session_state:
             session_end_time = time.time()
@@ -923,9 +935,17 @@ if authentication_status:
                 "session_duration_seconds": round(session_duration, 1),
                 "session_duration_minutes": round(session_duration / 60, 2)
             })
-       
-        st.session_state.clear()
+        
+        # Clear session
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
+
+# Check authentication before continuing
+if not authentication_status:
+    st.warning("Please log in to access the dashboard")
+    st.info("Use the sidebar to login, register, or reset your password")
+    st.stop()
 
 # Helper function to convert internal flags to professional readiness terminology
 def get_readiness_status(flag):
