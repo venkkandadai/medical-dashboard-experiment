@@ -657,7 +657,10 @@ if auth_mode == "Register":
                         "name": full_name,  # Keep for authenticator compatibility
                         "title": new_title,
                         "medical_school": new_medical_school,
-                        "password": hashed_pw
+                        "password": hashed_pw,
+                        "nda_agreed": True,
+                        "nda_date": datetime.datetime.now().isoformat(),
+                        "nda_version": "v1.0"
                     }])
                 ], ignore_index=True)
                 users_df.to_csv(user_db_path, index=False)
