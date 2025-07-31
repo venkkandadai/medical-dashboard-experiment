@@ -18,6 +18,8 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from io import BytesIO
+import threading
+import fcntl
 
 # Set page config first
 st.set_page_config(
@@ -69,8 +71,11 @@ def log_session_activity():
             "session_duration_minutes": round(session_duration / 60, 2)
         })
 
+# Thread-safe file writing
+analytics_lock = threading.Lock()
+
 def log_user_action(user_email, action, details=None):
-    """Log user actions for experiment analytics"""
+    """Thread-safe user action logging"""
     if user_email:  # Only log for authenticated users
        
         # Convert pandas/numpy types to native Python types for JSON serialization
@@ -100,10 +105,31 @@ def log_user_action(user_email, action, details=None):
             "page_mode": st.session_state.get("current_mode", "unknown")
         }
        
-        # Save to analytics file
+        # Thread-safe file writing with retry logic
         analytics_file = "experiment_analytics.json"
-        with open(analytics_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                with analytics_lock:
+                    with open(analytics_file, "a") as f:
+                        # Try to acquire file lock (Unix systems)
+                        try:
+                            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except:
+                            pass  # Skip locking on systems that don't support it
+                        
+                        f.write(json.dumps(log_entry) + "\n")
+                        f.flush()  # Ensure data is written immediately
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(0.1)  # Brief delay before retry
+                    continue
+                else:
+                    # Log error but don't crash the app
+                    print(f"Analytics logging failed after {max_retries} attempts: {e}")
 
 def log_page_view(user_email, mode):
     """Track page/mode changes"""
@@ -1112,8 +1138,9 @@ def load_cla_data():
         return pd.DataFrame()
     
 # --- CLA-SPECIFIC ANALYTICS FUNCTIONS ---
+# Thread-safe CLA logging (reuses the same lock)
 def log_cla_action(user_email, action, details=None):
-    """Log CLA-specific user actions separately from main dashboard analytics"""
+    """Thread-safe CLA-specific user action logging"""
     if user_email:
         def make_json_serializable(obj):
             if hasattr(obj, 'item'):
@@ -1140,10 +1167,31 @@ def log_cla_action(user_email, action, details=None):
             "page_mode": "Communication Skills Analytics"
         }
         
-        # Save to separate CLA analytics file
+        # Thread-safe file writing for CLA analytics
         cla_analytics_file = "cla_experiment_analytics.json"
-        with open(cla_analytics_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                with analytics_lock:  # Reuse the same lock
+                    with open(cla_analytics_file, "a") as f:
+                        # Try to acquire file lock
+                        try:
+                            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except:
+                            pass  # Skip locking on systems that don't support it
+                        
+                        f.write(json.dumps(log_entry) + "\n")
+                        f.flush()  # Ensure data is written immediately
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(0.1)  # Brief delay before retry
+                    continue
+                else:
+                    # Log error but don't crash the app
+                    print(f"CLA analytics logging failed after {max_retries} attempts: {e}")
 
 
 
