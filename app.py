@@ -886,7 +886,7 @@ def get_readiness_color_style(flag):
     return ""
 @st.cache_data
 def load_data():
-    base_path = os.path.expanduser("~/Documents/Streamlit_NBME_School_Dashboard1/data")
+    base_path = "data"
 
     students = pd.read_csv(os.path.join(base_path, "students_master.csv"))
     cbse = pd.read_csv(os.path.join(base_path, "cbse_summary.csv"))
@@ -1068,7 +1068,7 @@ except Exception as e:
 def load_cla_data():
     """Load CLA data separately from main dashboard data"""
     try:
-        base_path = os.path.expanduser("~/Documents/Streamlit_NBME_School_Dashboard1/data")
+        base_path = "data"
         cla_data = pd.read_csv(os.path.join(base_path, "cla_results.csv"))
         
         # Basic data cleaning
