@@ -797,9 +797,30 @@ cookie_config = {
 
 authenticator = stauth.Authenticate(user_creds, cookie_config["name"], cookie_config["key"], cookie_config["expiry_days"])
 
+# --- DEBUG LOGIN ISSUE ---
+st.sidebar.markdown("---")
+st.sidebar.markdown("**🔧 LOGIN DEBUG INFO**")
+st.sidebar.write(f"Auth mode: {auth_mode}")
+st.sidebar.write(f"Authentication status: {st.session_state.get('authentication_status', 'Not set')}")
+st.sidebar.write(f"User database exists: {os.path.exists(user_db_path)}")
+
+if os.path.exists(user_db_path):
+    users_df = pd.read_csv(user_db_path)
+    st.sidebar.write(f"Number of users in database: {len(users_df)}")
+else:
+    st.sidebar.write("No user database found")
+
+# Check if authenticator is working
+try:
+    st.sidebar.write("✅ Authenticator object created successfully")
+    st.sidebar.write(f"Cookie config: {cookie_config}")
+except Exception as e:
+    st.sidebar.write(f"❌ Authenticator error: {e}")
+st.sidebar.markdown("---")
+
 # Handle login - New API compatibility
 try:
-    login_result = authenticator.login(location='main')
+    login_result = authenticator.login(location='sidebar')
     if login_result is not None and len(login_result) == 3:
         name, authentication_status, username = login_result
     else:
