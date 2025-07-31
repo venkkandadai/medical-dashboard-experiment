@@ -1153,9 +1153,9 @@ st.sidebar.title("🩺 Wharton Street College of Medicine Dashboard")
 # Show Analytics tab only for admin users
 current_user = st.session_state.get("username")
 if current_user and is_admin(current_user):
-    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ Communication Skills Analytics", "📊 Analytics"]
+    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ CLA Analytics", "📊 Analytics"]
 else:
-    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ Communication Skills Analytics"]
+    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ CLA Analytics"]
 
 page = st.sidebar.selectbox("Navigation", mode_options)
 
@@ -3787,7 +3787,7 @@ elif page == "Cohort Analytics":
                 st.markdown(f"- {exam}")
 
 # --- COMMUNICATION SKILLS ANALYTICS (CLA) ---
-elif page == "🗣️ Communication Skills Analytics":
+elif page == "🗣️ CLA Analytics":
     st.markdown("# 🗣️ Communication Skills Analytics")
     st.markdown("*Communications Learning Assessment (CLA) Performance Dashboard*")
 
