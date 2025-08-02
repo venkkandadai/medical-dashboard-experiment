@@ -1522,7 +1522,7 @@ elif page == "Individual Student Dashboard":
         })
     else:
         # Prepare exam data for display
-        styled_exams = student_exams.sort_values("exam_date").copy().reset_index(drop=True)
+        styled_exams = student_exams.sort_values("exam_date", ascending=False).copy().reset_index(drop=True)
 
         # Track that user successfully viewed exam data
         log_workflow_stage(current_user, "student_analysis", "data_viewed", {
@@ -1621,6 +1621,17 @@ elif page == "Individual Student Dashboard":
                     
                     # Color coding by exam type (matching EPC approach)
                     chart_color = 'steelblue' if exam_type == 'CBSE' else 'darkgreen'
+
+
+                    # Add this AFTER your debug code, BEFORE the chart creation:
+
+                    # FIX: Convert exam_date to proper datetime
+                    exam_type_data = exam_type_data.copy()
+                    exam_type_data['exam_date'] = pd.to_datetime(exam_type_data['exam_date'])
+
+                    # Now create your charts (existing code stays the same)
+                    # Create base chart for this exam type
+                    base_chart = alt.Chart(exam_type_data)
                     
                     # Main score trend for this exam type only
                     score_trend_chart = base_chart.mark_circle(size=100, color=chart_color).encode(
@@ -1644,8 +1655,12 @@ elif page == "Individual Student Dashboard":
                         height=300,
                         title=f"{exam_type} Score Progression with Step 1 Readiness Zones"
                     )
+
+                    chart_key = f"score_trend_{selected_id}_{exam_type}_{len(exam_type_data)}"
+                    st.altair_chart(combined_chart, use_container_width=True, key=chart_key)
                     
-                    st.altair_chart(combined_chart, use_container_width=True)
+
+
         else:
             # Single exam type - use original chart
             exam_type = exam_types_available[0]
@@ -1688,6 +1703,18 @@ elif page == "Individual Student Dashboard":
             # Color by exam type
             chart_color = 'steelblue' if exam_type == 'CBSE' else 'darkgreen'
             
+
+            # Add this AFTER your debug code, BEFORE the chart creation:
+
+            # FIX: Convert exam_date to proper datetime  
+            student_exams = student_exams.copy()
+            student_exams['exam_date'] = pd.to_datetime(student_exams['exam_date'])
+
+            # Now create your charts (existing code stays the same)
+            # Create base chart with reference zones
+            base_chart = alt.Chart(student_exams)
+
+
             # Main score trend
             score_trend_chart = base_chart.mark_circle(size=100, color=chart_color).encode(
                 x=alt.X("exam_date:T", title="Exam Date"),
@@ -1711,7 +1738,8 @@ elif page == "Individual Student Dashboard":
                 title=f"{exam_type} Score Progression with Step 1 Readiness Zones"
             )
             
-            st.altair_chart(combined_chart, use_container_width=True)
+            chart_key = f"score_trend_single_{selected_id}_{exam_types[0]}_{len(student_exams)}"
+            st.altair_chart(combined_chart, use_container_width=True, key = chart_key)
         
         # Add legend explanation
         st.markdown("""
@@ -1730,6 +1758,81 @@ elif page == "Individual Student Dashboard":
             "charts_separated": len(exam_types_available) > 1
         })
 
+    
+    
+    # ENHANCED KEY INSIGHTS - More Prominent (Only if QLF data exists)
+    if not qlf_responses.empty:
+        student_qlf = qlf_responses[qlf_responses["student_id"] == selected_id].copy()
+        
+        if not student_qlf.empty:
+            # Ensure 'correct' column is numeric and clean data
+            student_qlf["correct"] = pd.to_numeric(student_qlf["correct"], errors='coerce')
+            student_qlf["national_pct_correct"] = pd.to_numeric(student_qlf["national_pct_correct"], errors='coerce')
+            student_qlf_clean = student_qlf.dropna(subset=["correct", "physician_competency", "content_topic", "content_description"]).copy()
+            
+            if not student_qlf_clean.empty:
+                st.markdown("---")
+                st.markdown("## 🎯 Key Insights & Action Items")
+                st.markdown("*Critical areas requiring immediate attention*")
+
+                # Create prominent colored containers
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    # Competency performance with enhanced styling
+                    comp_summary = student_qlf_clean.groupby("physician_competency").agg({
+                        "correct": ["count", "sum"]
+                    })
+                    comp_summary.columns = ["Total", "Correct"]
+                    comp_summary["% Correct"] = (comp_summary["Correct"] / comp_summary["Total"]) * 100
+                    comp_summary = comp_summary.sort_values("% Correct")
+                    
+                    st.markdown("### 📊 **Performance by Competency**")
+                    
+                    for comp, row in comp_summary.iterrows():
+                        pct = row["% Correct"]
+                        if pct < 60:
+                            st.error(f"🚨 **{comp}**: {pct:.1f}% ({row['Correct']}/{row['Total']}) - **IMMEDIATE FOCUS NEEDED**")
+                        elif pct < 75:
+                            st.warning(f"⚠️ **{comp}**: {pct:.1f}% ({row['Correct']}/{row['Total']}) - **Needs Improvement**")
+                        else:
+                            st.success(f"✅ **{comp}**: {pct:.1f}% ({row['Correct']}/{row['Total']}) - **Strong Performance**")
+
+                with col2:
+                    # High-yield misses with enhanced styling
+                    high_yield_missed = student_qlf_clean[
+                        (student_qlf_clean["correct"] == 0) &
+                        (student_qlf_clean["national_pct_correct"] >= 75)
+                    ].sort_values("national_pct_correct", ascending=False)
+                    
+                    st.markdown("### 🎯 **High-Yield Topics Missed**")
+                    
+                    if not high_yield_missed.empty:
+                        # Show in a warning container
+                        with st.container():
+                            st.markdown("**🚨 Priority Study Areas:**")
+                            for _, row in high_yield_missed.head(5).iterrows():
+                                st.markdown(f"• **{row['content_topic']}**: {row['content_description'][:50]}... ({row['national_pct_correct']:.0f}% national)")
+                    else:
+                        st.success("🎉 **Excellent!** No high-yield topics missed!")
+
+                # Add action summary box
+                st.markdown("---")
+                with st.container():
+                    st.markdown("### 📋 **Recommended Actions for Advisor Meeting:**")
+                    
+                    # Count issues for action items
+                    critical_competencies = len(comp_summary[comp_summary["% Correct"] < 60])
+                    moderate_competencies = len(comp_summary[(comp_summary["% Correct"] >= 60) & (comp_summary["% Correct"] < 75)])
+                    high_yield_count = len(high_yield_missed)
+                    
+                    if critical_competencies > 0:
+                        st.error(f"📅 **Schedule intensive tutoring** for {critical_competencies} critical competenc{'y' if critical_competencies == 1 else 'ies'}")
+                    if high_yield_count > 0:
+                        st.warning(f"📚 **Focus study plan** on {high_yield_count} high-yield topic{'s' if high_yield_count != 1 else ''}")
+                    if critical_competencies == 0 and high_yield_count == 0:
+                        st.success("🎯 **Continue current approach** - performance is strong across all areas")
+    
     # EPC
     st.subheader("📚 EPC Content Area Scores")
 
@@ -2034,45 +2137,7 @@ elif page == "Individual Student Dashboard":
                 styled_qlf = final_display.style.apply(highlight_status, axis=1)
                 st.dataframe(styled_qlf, use_container_width=True, height=400)
                
-                # Key insights summary
-                st.markdown("---")
-                st.markdown("### 🎯 Key Insights")
-               
-                col1, col2 = st.columns(2)
-               
-                with col1:
-                    # Competency performance
-                    comp_summary = student_qlf_clean.groupby("physician_competency").agg({
-                        "correct": ["count", "sum"]
-                    })
-                    comp_summary.columns = ["Total", "Correct"]
-                    comp_summary["% Correct"] = (comp_summary["Correct"] / comp_summary["Total"]) * 100
-                    comp_summary = comp_summary.sort_values("% Correct")
-                   
-                    st.markdown("**Performance by Competency:**")
-                    for comp, row in comp_summary.iterrows():
-                        pct = row["% Correct"]
-                        if pct < 60:
-                            emoji = "🚨"
-                        elif pct < 75:
-                            emoji = "⚠️"
-                        else:
-                            emoji = "✅"
-                        st.markdown(f"{emoji} **{comp}**: {pct:.1f}% ({row['Correct']}/{row['Total']})")
-               
-                with col2:
-                    # High-yield misses (questions >75% national average that were missed)
-                    high_yield_missed = student_qlf_clean[
-                        (student_qlf_clean["correct"] == 0) &
-                        (student_qlf_clean["national_pct_correct"] >= 75)
-                    ].sort_values("national_pct_correct", ascending=False)
-                   
-                    st.markdown("**High-Yield Topics Missed:**")
-                    if not high_yield_missed.empty:
-                        for _, row in high_yield_missed.head(5).iterrows():
-                            st.markdown(f"🎯 **{row['content_topic']}**: {row['content_description'][:50]}... ({row['national_pct_correct']:.0f}% national)")
-                    else:
-                        st.success("🎉 No high-yield topics missed!")
+                
                
                 # Log enhanced QLF interaction
                 log_feature_interaction(current_user, "enhanced_qlf_analysis", {
@@ -2114,8 +2179,8 @@ elif page == "At-Risk Student Triage":
         risk_levels = st.sidebar.multiselect(
             "Step 1 Readiness Levels",
             ["Red", "Yellow", "Green"],
-            default=[],  # No default selection
-            format_func=get_readiness_status  # Show professional terminology in dropdown
+            default=[],
+            format_func=get_readiness_status
         )
        
         # Exam recency filter
@@ -2134,7 +2199,6 @@ elif page == "At-Risk Student Triage":
            
             # Apply exam recency filter
             if exam_filter == "Most Recent":
-                # Get most recent exam for each student
                 triage_data['exam_date'] = pd.to_datetime(triage_data['exam_date'])
                 triage_data = triage_data.loc[triage_data.groupby('student_id')['exam_date'].idxmax()]
            
@@ -2189,8 +2253,6 @@ elif page == "At-Risk Student Triage":
                
                 # Convert flag to readiness terminology for display
                 display_data['Step 1 Readiness'] = display_data['flag'].apply(get_readiness_status)
-                
-                # Keep original flag for styling by adding it as a hidden helper column
                 display_data['_original_flag'] = display_data['flag']
                
                 # Rename columns for display
@@ -2204,7 +2266,6 @@ elif page == "At-Risk Student Triage":
                     'band': 'Performance Band'
                 }
                
-                # Only rename columns that exist
                 display_data = display_data.rename(columns={k: v for k, v in column_renames.items() if k in display_data.columns})
                
                 # Remove internal flag column but keep the hidden helper
@@ -2214,17 +2275,6 @@ elif page == "At-Risk Student Triage":
                 # Format Step 1 probability
                 if 'Step 1 Pass Prob' in display_data.columns:
                     display_data['Step 1 Pass Prob'] = display_data['Step 1 Pass Prob'].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "N/A")
-               
-                # Style the dataframe with color coding
-                def highlight_readiness(row):
-                    colors = []
-                    flag_val = row['_original_flag']  # Get flag directly from the row
-                    for col in row.index:
-                        if col == 'Step 1 Readiness':
-                            colors.append(get_readiness_color_style(flag_val) + " font-weight: bold")
-                        else:
-                            colors.append("")
-                    return colors
                
                 # Style the dataframe with color coding using a simpler approach
                 def highlight_readiness_simple(val):
@@ -2247,25 +2297,6 @@ elif page == "At-Risk Student Triage":
                 )
                 
                 st.dataframe(styled_df_final, use_container_width=True)
-                
-                # Debug option to check data consistency
-                if st.checkbox("🔍 Debug: Check data consistency", key="triage_debug"):
-                    st.markdown("**Data Consistency Check:**")
-                    debug_data = triage_data[['full_name', 'total_score', 'flag', 'band']].head(10)
-                    
-                    # Add expected values
-                    debug_data['Expected Flag'] = debug_data['total_score'].apply(
-                        lambda x: "Green" if x >= 66 else "Yellow" if x >= 62 else "Red"
-                    )
-                    debug_data['Expected Band'] = debug_data['total_score'].apply(
-                        lambda x: "Above Low Pass Range" if x >= 66 else "In Low Pass Range" if x >= 62 else "Below Low Pass Range"
-                    )
-                    
-                    # Check for mismatches
-                    debug_data['Flag Match'] = debug_data['flag'] == debug_data['Expected Flag']
-                    debug_data['Band Match'] = debug_data['band'] == debug_data['Expected Band']
-                    
-                    st.dataframe(debug_data, use_container_width=True)
                
                 # Action buttons
                 st.subheader("📤 Actions")
@@ -2273,7 +2304,7 @@ elif page == "At-Risk Student Triage":
                
                 with col1:
                     if st.button("📋 Export Student List to CSV"):
-                        csv = display_data.to_csv(index=False)
+                        csv = final_display.to_csv(index=False)
                         st.download_button(
                             label="Download CSV",
                             data=csv,
@@ -2284,7 +2315,7 @@ elif page == "At-Risk Student Triage":
                         log_feature_interaction(current_user, "export_triage_list", {
                             "cohort": selected_cohort,
                             "risk_levels": risk_levels,
-                            "student_count": len(display_data)
+                            "student_count": len(final_display)
                         })
                
                 with col2:
@@ -2314,9 +2345,14 @@ elif page == "At-Risk Student Triage":
             st.markdown("- **✅ Step 1 Ready**: Score ≥66 - **On track for Step 1 success**")
            
     except Exception as e:
-        st.error(f"Error in triage page: {str(e)}")
-        import traceback
-        st.text(traceback.format_exc())
+        error_message = str(e).lower()
+        if "failed to fetch" in error_message or "module" in error_message:
+            st.error("⚠️ **Temporary Loading Issue Detected**")
+            st.info("🔄 **Quick Fix**: Please refresh your browser page (press F5 or Ctrl+R)")
+            st.success("💡 This is a known intermittent issue that resolves on refresh")
+        else:
+            st.error(f"Error in triage page: {str(e)}")
+            st.info("Please try refreshing the page or contact support if the issue persists.")
 
 # --- COHORT ANALYTICS ---
 elif page == "Cohort Analytics":
@@ -2382,29 +2418,34 @@ elif page == "Cohort Analytics":
             st.info("💡 **Psychometric Insight**: Different summary statistics serve different educational purposes. Choose the view that matches your decision-making needs.")
             
             # Toggle for different statistical views
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                view_mode = st.selectbox(
-                    "📈 Statistical View",
-                    ["Mean Scores", "Median Scores", "% Above Threshold (≥66)"],
-                    help="Choose the statistical measure that best serves your educational decision-making needs"
-                )
-            
-            with col2:
-                st.markdown("**📚 When to Use:**")
-                if view_mode == "Mean Scores":
+            st.markdown("### 📊 Analysis View Selection")
+            view_mode = st.selectbox(
+                "📈 Statistical View",
+                ["Mean Scores", "Median Scores", "% Above Threshold (≥66)"],
+                help="Choose the statistical measure that best serves your educational decision-making needs"
+            )
+
+            # Compact reference guide
+            with st.expander("📖 Statistical View Reference Guide"):
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("**📊 Mean Scores**")
                     st.markdown("• Program comparison")
-                    st.markdown("• Research & reporting")
+                    st.markdown("• Research & reporting") 
                     st.markdown("• Overall trends")
-                elif view_mode == "Median Scores": 
-                    st.markdown("• Typical student performance")
-                    st.markdown("• Outlier-resistant analysis")
+                
+                with col2:
+                    st.markdown("**📈 Median Scores**")
+                    st.markdown("• Typical performance")
+                    st.markdown("• Outlier-resistant")
                     st.markdown("• Curriculum evaluation")
-                else:  # % Above Threshold
-                    st.markdown("• **Intervention planning**")
-                    st.markdown("• **Resource allocation**")
-                    st.markdown("• **Step 1 readiness counts**")
+                
+                with col3:
+                    st.markdown("**🎯 % Above Threshold**")
+                    st.markdown("• Intervention planning")
+                    st.markdown("• Resource allocation")
+                    st.markdown("• Step 1 readiness")
             
             # Log the toggle usage
             log_feature_interaction(current_user, "psychometric_toggle_usage", {
