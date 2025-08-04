@@ -36,6 +36,7 @@ ADMIN_EMAILS = [
     "medschool.dashboard.prototype@gmail.com", # System email has admin access
     "kmcallister@nbme.org",    # System email has admin access
     "rgagliardi@nbme.org",    # System email has admin access
+    "skelley@nbme.org",    # System email has admin access
     # Add more researcher/admin emails as needed:
     # "researcher2@university.edu",
     # "supervisor@medschool.edu",
@@ -1201,8 +1202,9 @@ st.sidebar.title("🩺 Wharton Street College of Medicine Dashboard")
 
 # Show Analytics tab only for admin users
 current_user = st.session_state.get("username")
+# Add Compliance to navigation
 if current_user and is_admin(current_user):
-    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ CLA Analytics", "📊 Analytics"]
+    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ CLA Analytics", "📋 Compliance", "📊 Analytics"]
 else:
     mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ CLA Analytics"]
 
@@ -4098,6 +4100,418 @@ elif page == "🗣️ CLA Analytics":
                 st.markdown("- Exercise-by-exercise completion tracking")
                 st.markdown("- Patient scenario performance analysis")
                 st.markdown("- Communication skills improvement recommendations")
+
+
+# --- LCME COMPLIANCE DASHBOARD ---
+elif page == "📋 Compliance":
+    # Admin-only access check
+    if not current_user or not is_admin(current_user):
+        st.error("🔒 **Access Denied**: Compliance reports are restricted to administrators only.")
+        st.info("💡 Please contact your system administrator for access to compliance features.")
+        st.stop()
+    
+    st.markdown("# 📋 LCME Compliance Dashboard")
+    st.markdown("*Automated reporting for accreditation and quality improvement*")
+    
+    # Log compliance page access
+    log_feature_interaction(current_user, "compliance_dashboard_access", {
+        "access_timestamp": datetime.datetime.now().isoformat()
+    })
+    
+    # Check if we have required data
+    if exam_records.empty or students.empty:
+        st.error("⚠️ Compliance reports require student and exam data.")
+        st.stop()
+    
+    # Merge basic data for compliance analysis
+    compliance_data = exam_records.merge(students[['student_id', 'cohort_year']], on='student_id')
+    compliance_data['exam_date'] = pd.to_datetime(compliance_data['exam_date'])
+    
+    # Overview Metrics
+    st.subheader("📊 Compliance Overview")
+
+    # Get most recent assessment for each student (to avoid double-counting)
+    latest_assessments = compliance_data.loc[compliance_data.groupby('student_id')['exam_date'].idxmax()]
+
+    # Calculate recent assessments first (we'll need this for the denominator)
+    recent_cutoff = pd.Timestamp.now() - pd.Timedelta(days=180)
+    recent_assessments = latest_assessments[latest_assessments['exam_date'] >= recent_cutoff]
+    recent_students = len(recent_assessments)
+
+    # Create 5 columns instead of 4 to show all readiness categories
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        total_students = students['student_id'].nunique()
+        st.metric("👥 Total Students", total_students)
+
+    with col2:
+        st.metric("📅 Recently Assessed", recent_students)
+
+    with col3:
+        # At-risk identification rate (based on RECENT assessments only)
+        at_risk_students = len(recent_assessments[recent_assessments['flag'] == 'Red'])
+        at_risk_rate = (at_risk_students / recent_students) * 100 if recent_students > 0 else 0
+        st.metric("🚨 Below Threshold", f"{at_risk_rate:.1f}%", 
+                help=f"{at_risk_students} of {recent_students} recently assessed students")
+
+    with col4:
+        # Approaching readiness rate (based on RECENT assessments only)
+        approaching_students = len(recent_assessments[recent_assessments['flag'] == 'Yellow'])
+        approaching_rate = (approaching_students / recent_students) * 100 if recent_students > 0 else 0
+        st.metric("⚠️ Approaching Ready", f"{approaching_rate:.1f}%",
+                help=f"{approaching_students} of {recent_students} recently assessed students")
+
+    with col5:
+        # Step 1 readiness rate (based on RECENT assessments only)
+        ready_students = len(recent_assessments[recent_assessments['flag'] == 'Green'])
+        ready_rate = (ready_students / recent_students) * 100 if recent_students > 0 else 0
+        st.metric("✅ Step 1 Ready", f"{ready_rate:.1f}%",
+                help=f"{ready_students} of {recent_students} recently assessed students")
+    
+    # LCME Standard 9.1: Student Performance Monitoring
+    st.markdown("---")
+    st.subheader("📋 LCME Standard 9.1: Student Performance Monitoring")
+    st.info("💡 **LCME Requirement**: Schools must have systems to monitor student progress and identify those in academic difficulty")
+
+    # LCME Standard 9.1: Student Performance Monitoring
+    st.markdown("---")
+    st.subheader("📋 LCME Standard 9.1: Student Performance Monitoring")
+    st.info("💡 **LCME Requirement**: Schools must have systems to monitor student progress and identify those in academic difficulty")
+
+    # Track LCME 9.1 section viewing
+    log_feature_interaction(current_user, "lcme_standard_viewed", {
+        "standard": "9.1_student_performance_monitoring",
+        "students_analyzed": len(recent_assessments),
+        "at_risk_students": len(recent_assessments[recent_assessments['flag'] == 'Red']),
+        "approaching_students": len(recent_assessments[recent_assessments['flag'] == 'Yellow']),
+        "ready_students": len(recent_assessments[recent_assessments['flag'] == 'Green'])
+    })
+    
+    # At-risk identification timeline
+    st.markdown("### 🚨 At-Risk Student Identification Analysis")
+    
+    # Get most recent data for each student (no longer needed)
+    #latest_student_data = compliance_data.loc[compliance_data.groupby('student_id')['exam_date'].idxmax()]
+    
+    # Risk distribution by cohort (using recent assessments only)
+    risk_by_cohort = recent_assessments.groupby(['cohort_year', 'flag']).size().unstack(fill_value=0)
+    risk_by_cohort_pct = risk_by_cohort.div(risk_by_cohort.sum(axis=1), axis=0) * 100
+    
+    if not risk_by_cohort_pct.empty:
+        # Create stacked bar chart for risk distribution
+        risk_chart_data = risk_by_cohort_pct.reset_index()
+        risk_chart_data_long = risk_chart_data.melt(
+            id_vars=['cohort_year'], 
+            var_name='risk_level', 
+            value_name='percentage'
+        )
+        
+        risk_chart = alt.Chart(risk_chart_data_long).mark_bar().encode(
+            x=alt.X('cohort_year:N', title='Cohort Year'),
+            y=alt.Y('percentage:Q', title='Percentage of Students'),
+            color=alt.Color('risk_level:N',
+                           scale=alt.Scale(domain=['Green', 'Yellow', 'Red'],
+                                         range=['#28a745', '#ffc107', '#dc3545']),
+                           legend=alt.Legend(title="Risk Level")),
+            tooltip=['cohort_year:N', 'risk_level:N', 'percentage:Q']
+        ).properties(
+            height=300,
+            title="Risk Distribution by Cohort (LCME 9.1 Compliance)"
+        )
+        
+        st.altair_chart(risk_chart, use_container_width=True)
+
+        # Track risk distribution chart viewing
+        log_feature_interaction(current_user, "compliance_chart_viewed", {
+            "chart_type": "risk_distribution_by_cohort",
+            "cohorts_analyzed": list(risk_chart_data_long['cohort_year'].unique()),
+            "total_cohorts": len(risk_chart_data_long['cohort_year'].unique()),
+            "chart_data_points": len(risk_chart_data_long)
+        })
+        
+        # Summary table
+        st.markdown("**Risk Distribution Summary:**")
+        risk_summary = risk_by_cohort_pct.round(1)
+        risk_summary.columns = ['🟢 Step 1 Ready (%)', '🟡 Approaching Readiness (%)', '🔴 Below Threshold (%)']
+        st.dataframe(risk_summary, use_container_width=True)
+    
+    # LCME Standard 9.4: Academic Support Systems
+    st.markdown("---")
+    st.subheader("📚 LCME Standard 9.4: Academic Support Systems")
+    st.info("💡 **LCME Requirement**: Schools must provide academic counseling and support services")
+
+    
+    
+    # Students needing intervention
+    st.markdown("### 🎯 Students Requiring Academic Support")
+    
+    # Use the same recent_assessments data that we use for overview metrics
+    intervention_needed = recent_assessments[recent_assessments['flag'].isin(['Red', 'Yellow'])]
+
+    # Track LCME 9.4 section viewing (after intervention_needed is defined)
+    log_feature_interaction(current_user, "lcme_standard_viewed", {
+        "standard": "9.4_academic_support_systems",
+        "intervention_needed_total": len(intervention_needed),
+        "immediate_intervention": len(intervention_needed[intervention_needed['flag'] == 'Red']),
+        "enhanced_monitoring": len(intervention_needed[intervention_needed['flag'] == 'Yellow'])
+    })
+    
+    if not intervention_needed.empty:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🚨 Immediate Intervention (Red Flags)**")
+            immediate_intervention = intervention_needed[intervention_needed['flag'] == 'Red']
+            st.metric("Students", len(immediate_intervention))
+            
+            if len(immediate_intervention) > 0:
+                # Add student names for action
+                # intervention_needed already has cohort_year, just need names
+                intervention_students = intervention_needed.merge(
+                    students[['student_id', 'first_name', 'last_name']], 
+                    on='student_id'
+                )
+                intervention_students['full_name'] = intervention_students['last_name'] + ", " + intervention_students['first_name']
+
+                st.markdown("**Students requiring immediate support:**")
+                for _, student in intervention_students.iterrows():
+                    st.markdown(f"• {student['full_name']} (Cohort {student['cohort_year']})")
+        
+        with col2:
+            st.markdown("**⚠️ Enhanced Monitoring (Yellow Flags)**")
+            enhanced_monitoring = intervention_needed[intervention_needed['flag'] == 'Yellow']
+            st.metric("Students", len(enhanced_monitoring))
+            
+            if len(enhanced_monitoring) > 0:
+                # enhanced_monitoring already has cohort_year, just need names
+                monitoring_students = enhanced_monitoring.merge(
+                    students[['student_id', 'first_name', 'last_name']], 
+                    on='student_id'
+                )
+                monitoring_students['full_name'] = monitoring_students['last_name'] + ", " + monitoring_students['first_name']
+                
+                st.markdown("**Students requiring enhanced monitoring:**")
+                for _, student in monitoring_students.head(5).iterrows():  # Show first 5
+                    st.markdown(f"• {student['full_name']} (Cohort {student['cohort_year']})")
+                
+                if len(monitoring_students) > 5:
+                    st.markdown(f"*... and {len(monitoring_students) - 5} more students*")
+    else:
+        st.success("✅ No students currently flagged for immediate academic intervention")
+    
+    # LCME Standard 1.1: Continuous Quality Improvement
+    st.markdown("---")
+    st.subheader("🔄 LCME Standard 1.1: Continuous Quality Improvement")
+    st.info("💡 **LCME Requirement**: Schools must collect and analyze outcome data for continuous improvement")
+
+    # Track LCME 1.1 section viewing
+    log_feature_interaction(current_user, "lcme_standard_viewed", {
+        "standard": "1.1_continuous_quality_improvement",
+        "content_areas_available": len(content_cols) if 'content_cols' in locals() else 0,
+        "has_epc_data": not epc_scores.empty
+    })
+    
+    # Curriculum effectiveness analysis
+    st.markdown("### 📈 Curriculum Effectiveness Analysis")
+    
+    if not epc_scores.empty:
+        # Merge EPC data with student info
+        epc_compliance = epc_scores.merge(students[['student_id', 'cohort_year']], on='student_id')
+        
+        # Get content area columns
+        exclude_cols_epc = ['student_id', 'exam_type', 'exam_date', 'cohort_year', 'exam_round']
+        content_cols = [col for col in epc_compliance.columns if col not in exclude_cols_epc]
+        
+        if content_cols:
+            # Calculate mean performance by content area across all cohorts
+            epc_long = epc_compliance.melt(
+                id_vars=['student_id', 'cohort_year', 'exam_type'],
+                value_vars=content_cols,
+                var_name='content_area',
+                value_name='score'
+            )
+            
+            epc_long['score'] = pd.to_numeric(epc_long['score'], errors='coerce')
+            epc_long = epc_long.dropna(subset=['score'])
+            epc_long = epc_long[epc_long['score'] > 0]  # Remove likely missing data
+            
+            if not epc_long.empty:
+                # Content area performance summary
+                content_performance = epc_long.groupby('content_area')['score'].agg(['mean', 'std', 'count']).round(1)
+                content_performance.columns = ['Mean Score', 'Std Dev', 'Sample Size']
+                content_performance = content_performance.sort_values('Mean Score')
+                
+                # Identify areas for improvement (bottom 20%)
+                bottom_20_pct = int(len(content_performance) * 0.2)
+                improvement_areas = content_performance.head(max(3, bottom_20_pct))
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**🔴 Content Areas Requiring Attention:**")
+                    for area, row in improvement_areas.iterrows():
+                        st.markdown(f"• **{area[:40]}...**: {row['Mean Score']:.1f}% (n={row['Sample Size']})")
+                
+                with col2:
+                    st.markdown("**🟢 Strongest Content Areas:**")
+                    top_areas = content_performance.tail(3)
+                    for area, row in top_areas.iterrows():
+                        st.markdown(f"• **{area[:40]}...**: {row['Mean Score']:.1f}% (n={row['Sample Size']})")
+                
+                # Full content area performance table
+                st.markdown("**Complete Content Area Performance Analysis:**")
+                st.dataframe(content_performance, use_container_width=True)
+
+                # Track content area analysis interaction
+                log_feature_interaction(current_user, "compliance_content_analysis", {
+                    "total_content_areas": len(content_performance),
+                    "improvement_areas_identified": len(improvement_areas),
+                    "lowest_performing_area": improvement_areas.index[0] if not improvement_areas.empty else None,
+                    "lowest_score": improvement_areas['Mean Score'].iloc[0] if not improvement_areas.empty else None,
+                    "highest_performing_area": content_performance.index[-1] if not content_performance.empty else None,
+                    "highest_score": content_performance['Mean Score'].iloc[-1] if not content_performance.empty else None
+                })
+
+    else:
+        st.info("📝 Content area analysis requires EPC data")
+    
+    # Student Progression Analytics
+    st.markdown("---")
+    st.subheader("📊 Student Progression Analytics")
+    
+    # Cohort progression summary
+    cohort_progression = compliance_data.groupby('cohort_year').agg({
+        'student_id': 'nunique',
+        'total_score': 'mean',
+        'flag': lambda x: (x == 'Green').sum() / len(x) * 100
+    }).round(1)
+    
+    cohort_progression.columns = ['Students Enrolled', 'Avg Score', 'Step 1 Ready Rate (%)']
+    cohort_progression = cohort_progression.sort_index(ascending=False)
+    
+    st.markdown("**Cohort Progression Summary:**")
+    st.dataframe(cohort_progression, use_container_width=True)
+
+    # Track student progression analytics viewing
+    log_feature_interaction(current_user, "compliance_progression_analytics", {
+        "cohorts_analyzed": len(cohort_progression),
+        "cohort_years": list(cohort_progression.index),
+        "overall_avg_score": cohort_progression['Avg Score'].mean() if not cohort_progression.empty else 0,
+        "overall_ready_rate": cohort_progression['Step 1 Ready Rate (%)'].mean() if not cohort_progression.empty else 0
+    })
+    
+    # Export functionality for compliance reporting
+    st.markdown("---")
+    st.subheader("📤 Compliance Report Export")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📋 Export At-Risk Students List", use_container_width=True):
+            if not intervention_needed.empty:
+                # intervention_needed already has cohort_year, just need names
+                export_data = intervention_needed.merge(
+                    students[['student_id', 'first_name', 'last_name']], 
+                    on='student_id'
+)
+                export_data['full_name'] = export_data['last_name'] + ", " + export_data['first_name']
+                export_columns = ['full_name', 'student_id', 'cohort_year', 'exam_type', 'exam_date', 'total_score', 'flag']
+                export_csv = export_data[export_columns].to_csv(index=False)
+                
+                st.download_button(
+                    label="Download At-Risk Students CSV",
+                    data=export_csv,
+                    file_name=f"LCME_at_risk_students_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+                
+                # Log export action
+                log_feature_interaction(current_user, "compliance_export", {
+                    "export_type": "at_risk_students",
+                    "student_count": len(export_data),
+                    "red_flags": len(export_data[export_data['flag'] == 'Red']),
+                    "yellow_flags": len(export_data[export_data['flag'] == 'Yellow']),
+                    "cohorts_included": list(export_data['cohort_year'].unique()),
+                    "export_timestamp": datetime.datetime.now().isoformat(),
+                    "file_name": f"LCME_at_risk_students_{datetime.datetime.now().strftime('%Y%m%d')}.csv"
+                })
+            else:
+                st.info("No at-risk students to export")
+    
+    with col2:
+        if st.button("📊 Export Cohort Analysis", use_container_width=True):
+            cohort_csv = cohort_progression.to_csv()
+            st.download_button(
+                label="Download Cohort Analysis CSV",
+                data=cohort_csv,
+                file_name=f"LCME_cohort_analysis_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
+            
+            log_feature_interaction(current_user, "compliance_export", {
+                "export_type": "cohort_analysis",
+                "cohort_count": len(cohort_progression)
+            })
+    
+    with col3:
+        if not epc_long.empty if 'epc_long' in locals() else st.button("📚 Export Content Analysis", use_container_width=True, disabled=True):
+            if 'content_performance' in locals():
+                content_csv = content_performance.to_csv()
+                st.download_button(
+                    label="Download Content Analysis CSV",
+                    data=content_csv,
+                    file_name=f"LCME_content_analysis_{datetime.datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+                
+                log_feature_interaction(current_user, "compliance_export", {
+                    "export_type": "content_analysis",
+                    "content_areas": len(content_performance)
+                })
+            else:
+                st.info("Content analysis requires EPC data")
+    
+    # Compliance notes and recommendations
+    st.markdown("---")
+    st.subheader("📝 LCME Compliance Notes")
+
+    # Track compliance notes section viewing
+    log_feature_interaction(current_user, "compliance_notes_viewed", {
+        "notes_section": "lcme_site_visit_preparation",
+        "view_timestamp": datetime.datetime.now().isoformat()
+    })
+    
+    st.markdown("""
+    **📋 For LCME Site Visits:**
+    - **Student Monitoring**: This dashboard demonstrates systematic tracking of student progress (Standard 9.1)
+    - **Academic Support**: At-risk identification shows early intervention systems (Standard 9.4)  
+    - **Quality Improvement**: Content area analysis shows data-driven curriculum decisions (Standard 1.1)
+    - **Documentation**: All reports can be exported for accreditation evidence
+    
+    **💡 Recommended Actions:**
+    1. Review at-risk students monthly for intervention planning
+    2. Use content area data for curriculum committee meetings
+    3. Track intervention effectiveness for continuous improvement
+    4. Export reports quarterly for compliance documentation
+    """)
+    
+    # Enhanced final summary tracking
+    log_feature_interaction(current_user, "compliance_dashboard_full_usage", {
+        "total_students_analyzed": total_students,
+        "recently_assessed_students": recent_students,
+        "at_risk_students": len(recent_assessments[recent_assessments['flag'] == 'Red']),
+        "approaching_students": len(recent_assessments[recent_assessments['flag'] == 'Yellow']),
+        "ready_students": len(recent_assessments[recent_assessments['flag'] == 'Green']),
+        "at_risk_rate": (len(recent_assessments[recent_assessments['flag'] == 'Red']) / recent_students * 100) if recent_students > 0 else 0,
+        "ready_rate": (len(recent_assessments[recent_assessments['flag'] == 'Green']) / recent_students * 100) if recent_students > 0 else 0,
+        "cohorts_analyzed": len(cohort_progression),
+        "content_areas_available": len(content_cols) if 'content_cols' in locals() else 0,
+        "session_duration_minutes": (time.time() - st.session_state.get("session_start", time.time())) / 60,
+        "compliance_features_used": "comprehensive_dashboard_view"
+    })
+
+
 
 # --- ANALYTICS DASHBOARD (Admin Only) ---
 elif page == "📊 Analytics" and is_admin(current_user):
