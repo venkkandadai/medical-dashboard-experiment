@@ -9,6 +9,7 @@ import json
 import uuid
 import secrets
 import smtplib
+import numpy as np  # For trend calculation
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from reportlab.lib.pagesizes import letter, A4
@@ -1569,196 +1570,346 @@ elif page == "Individual Student Dashboard":
     else:
         st.dataframe(exam_display, use_container_width=True)
 
-    # Score trend over time
-    if selected_exam_label == "All" and not student_exams.empty:
-        st.subheader("📈 Score Trend Over Time")
+# IMPROVED SCORE TREND VISUALIZATION
+# Replace the existing "Score Trend Over Time" section in your Individual Student Dashboard
+
+# Score trend over time - IMPROVED VERSION
+if 'selected_exam_label' in locals() and selected_exam_label == "All" and 'student_exams' in locals() and not student_exams.empty:
+    st.subheader("📈 Exam Score Progression")
+    
+    # Ensure chronological ordering
+    student_exams = student_exams.copy()
+    student_exams['exam_date'] = pd.to_datetime(student_exams['exam_date'])
+    student_exams = student_exams.sort_values('exam_date')
+    
+    # Check what exam types this student has
+    exam_types_available = student_exams['exam_type'].unique()
+    
+    if len(exam_types_available) > 1:
+        # Student has both CBSE and CBSSA
+        st.info("💡 **Note**: CBSE and CBSSA assess different constructs and are shown separately below")
         
-        # Check what exam types this student has
-        exam_types_available = student_exams['exam_type'].unique()
+        # Create two columns for side-by-side comparison
+        col1, col2 = st.columns(2)
         
-        if len(exam_types_available) > 1:
-            # Apply same separation logic as EPC section
-            st.info("💡 **Note**: CBSE and CBSSA assess different constructs and scores are not directly comparable")
-            
-            # Create separate charts for each exam type (matching EPC approach)
-            for exam_type in sorted(exam_types_available):
-                exam_type_data = student_exams[student_exams['exam_type'] == exam_type].copy()
+        # CBSE Chart
+        with col1:
+            cbse_data = student_exams[student_exams['exam_type'] == 'CBSE'].copy()
+            if not cbse_data.empty:
+                st.markdown(f"**CBSE Progression** ({len(cbse_data)} exams)")
                 
-                if not exam_type_data.empty:
-                    st.markdown(f"**{exam_type} Score Timeline** (n={len(exam_type_data)})")
-                    
-                    # Create base chart for this exam type
-                    base_chart = alt.Chart(exam_type_data)
-                    
-                    # Background shaded zones for readiness levels
-                    red_zone = alt.Chart(pd.DataFrame({'y': [0], 'y2': [62]})).mark_rect(
-                        opacity=0.1, color='red'
-                    ).encode(
-                        y=alt.Y('y:Q', scale=alt.Scale(domain=[30, 95])),
-                        y2='y2:Q'
-                    )
-                    
-                    yellow_zone = alt.Chart(pd.DataFrame({'y': [62], 'y2': [66]})).mark_rect(
-                        opacity=0.1, color='orange'
-                    ).encode(
-                        y='y:Q',
-                        y2='y2:Q'
-                    )
-                    
-                    green_zone = alt.Chart(pd.DataFrame({'y': [66], 'y2': [95]})).mark_rect(
-                        opacity=0.1, color='green'
-                    ).encode(
-                        y='y:Q',
-                        y2='y2:Q'
-                    )
-                    
-                    # Reference lines
-                    line_62 = alt.Chart(pd.DataFrame({'threshold': [62]})).mark_rule(
-                        color='orange', strokeDash=[5, 5], size=2
-                    ).encode(y='threshold:Q')
-                    
-                    line_66 = alt.Chart(pd.DataFrame({'threshold': [66]})).mark_rule(
-                        color='green', strokeDash=[5, 5], size=2
-                    ).encode(y='threshold:Q')
-                    
-                    # Color coding by exam type (matching EPC approach)
-                    chart_color = 'steelblue' if exam_type == 'CBSE' else 'darkgreen'
-
-
-                    # Add this AFTER your debug code, BEFORE the chart creation:
-
-                    # FIX: Convert exam_date to proper datetime
-                    exam_type_data = exam_type_data.copy()
-                    exam_type_data['exam_date'] = pd.to_datetime(exam_type_data['exam_date'])
-
-                    # Now create your charts (existing code stays the same)
-                    # Create base chart for this exam type
-                    base_chart = alt.Chart(exam_type_data)
-                    
-                    # Main score trend for this exam type only
-                    score_trend_chart = base_chart.mark_circle(size=100, color=chart_color).encode(
-                        x=alt.X("exam_date:T", title="Exam Date"),
-                        y=alt.Y("total_score:Q", title="Score", scale=alt.Scale(domain=[30, 95])),
-                        tooltip=["exam_type", "exam_date", "total_score"]
-                    )
-                    
-                    # Add connecting line if multiple exams of same type
-                    if len(exam_type_data) > 1:
-                        line_chart = base_chart.mark_line(color=chart_color, strokeWidth=2).encode(
-                            x=alt.X("exam_date:T"),
-                            y=alt.Y("total_score:Q")
-                        )
-                        score_trend_chart = score_trend_chart + line_chart
-                    
-                    # Combine all layers
-                    combined_chart = (red_zone + yellow_zone + green_zone + line_62 + line_66 + score_trend_chart).resolve_scale(
-                        y='shared'
-                    ).properties(
-                        height=300,
-                        title=f"{exam_type} Score Progression with Step 1 Readiness Zones"
-                    )
-
-                    chart_key = f"score_trend_{selected_id}_{exam_type}_{len(exam_type_data)}"
-                    st.altair_chart(combined_chart, use_container_width=True, key=chart_key)
-                    
-
-
-        else:
-            # Single exam type - use original chart
-            exam_type = exam_types_available[0]
-            st.markdown(f"**{exam_type} Score Timeline** (n={len(student_exams)})")
-            
-            # Create base chart with reference zones
-            base_chart = alt.Chart(student_exams)
-            
-            # Background shaded zones for readiness levels
-            red_zone = alt.Chart(pd.DataFrame({'y': [0], 'y2': [62]})).mark_rect(
-                opacity=0.1, color='red'
-            ).encode(
-                y=alt.Y('y:Q', scale=alt.Scale(domain=[30, 95])),
-                y2='y2:Q'
-            )
-            
-            yellow_zone = alt.Chart(pd.DataFrame({'y': [62], 'y2': [66]})).mark_rect(
-                opacity=0.1, color='orange'
-            ).encode(
-                y='y:Q',
-                y2='y2:Q'
-            )
-            
-            green_zone = alt.Chart(pd.DataFrame({'y': [66], 'y2': [95]})).mark_rect(
-                opacity=0.1, color='green'
-            ).encode(
-                y='y:Q',
-                y2='y2:Q'
-            )
-            
-            # Reference lines
-            line_62 = alt.Chart(pd.DataFrame({'threshold': [62]})).mark_rule(
-                color='orange', strokeDash=[5, 5], size=2
-            ).encode(y='threshold:Q')
-            
-            line_66 = alt.Chart(pd.DataFrame({'threshold': [66]})).mark_rule(
-                color='green', strokeDash=[5, 5], size=2
-            ).encode(y='threshold:Q')
-            
-            # Color by exam type
-            chart_color = 'steelblue' if exam_type == 'CBSE' else 'darkgreen'
-            
-
-            # Add this AFTER your debug code, BEFORE the chart creation:
-
-            # FIX: Convert exam_date to proper datetime  
-            student_exams = student_exams.copy()
-            student_exams['exam_date'] = pd.to_datetime(student_exams['exam_date'])
-
-            # Now create your charts (existing code stays the same)
-            # Create base chart with reference zones
-            base_chart = alt.Chart(student_exams)
-
-
-            # Main score trend
-            score_trend_chart = base_chart.mark_circle(size=100, color=chart_color).encode(
-                x=alt.X("exam_date:T", title="Exam Date"),
-                y=alt.Y("total_score:Q", title="Score", scale=alt.Scale(domain=[30, 95])),
-                tooltip=["exam_type", "exam_date", "total_score"]
-            )
-            
-            # Add connecting line if multiple exams
-            if len(student_exams) > 1:
-                line_chart = base_chart.mark_line(color=chart_color, strokeWidth=2).encode(
-                    x=alt.X("exam_date:T"),
-                    y=alt.Y("total_score:Q")
+                # Add exam number for clarity
+                cbse_data['exam_number'] = range(1, len(cbse_data) + 1)
+                cbse_data['exam_label'] = 'Exam ' + cbse_data['exam_number'].astype(str)
+                
+                # Create the line chart
+                line_chart = alt.Chart(cbse_data).mark_line(
+                    point=True,
+                    strokeWidth=3,
+                    color='#2E86AB'
+                ).encode(
+                    x=alt.X('exam_label:O', 
+                           title='Exam Sequence',
+                           sort=None),  # Maintains our order
+                    y=alt.Y('total_score:Q', 
+                           title='Score',
+                           scale=alt.Scale(domain=[0, 100])),
+                    tooltip=[
+                        alt.Tooltip('exam_label:N', title='Exam'),
+                        alt.Tooltip('exam_date:T', title='Date', format='%B %d, %Y'),
+                        alt.Tooltip('total_score:Q', title='Score', format='.1f')
+                    ]
                 )
-                score_trend_chart = score_trend_chart + line_chart
-            
-            # Combine all layers
-            combined_chart = (red_zone + yellow_zone + green_zone + line_62 + line_66 + score_trend_chart).resolve_scale(
-                y='shared'
-            ).properties(
-                height=350,
-                title=f"{exam_type} Score Progression with Step 1 Readiness Zones"
-            )
-            
-            chart_key = f"score_trend_single_{selected_id}_{exam_types[0]}_{len(student_exams)}"
-            st.altair_chart(combined_chart, use_container_width=True, key = chart_key)
+                
+                # Add points for emphasis
+                points = alt.Chart(cbse_data).mark_circle(
+                    size=100,
+                    color='#2E86AB'
+                ).encode(
+                    x=alt.X('exam_label:O', sort=None),
+                    y='total_score:Q',
+                    tooltip=[
+                        alt.Tooltip('exam_label:N', title='Exam'),
+                        alt.Tooltip('exam_date:T', title='Date', format='%B %d, %Y'),
+                        alt.Tooltip('total_score:Q', title='Score', format='.1f')
+                    ]
+                )
+                
+                # Add reference lines for readiness thresholds
+                threshold_high = alt.Chart(pd.DataFrame({'y': [66]})).mark_rule(
+                    strokeDash=[5, 5],
+                    color='green',
+                    opacity=0.5
+                ).encode(y='y:Q')
+                
+                threshold_low = alt.Chart(pd.DataFrame({'y': [62]})).mark_rule(
+                    strokeDash=[5, 5],
+                    color='orange',
+                    opacity=0.5
+                ).encode(y='y:Q')
+                
+                # Combine all elements
+                combined_chart = (line_chart + points + threshold_high + threshold_low).properties(
+                    width=300,
+                    height=250,
+                    title='CBSE Score Trend (Chronological)'
+                )
+                
+                st.altair_chart(combined_chart, use_container_width=True)
+                
+                # Calculate and display change score
+                if len(cbse_data) > 1:
+                    first_score = cbse_data.iloc[0]['total_score']
+                    last_score = cbse_data.iloc[-1]['total_score']
+                    change = last_score - first_score
+                    
+                    # Display change with appropriate formatting
+                    if change > 0:
+                        st.success(f"📈 **Improvement:** +{change:.1f} points")
+                        st.caption(f"From {first_score:.1f} → {last_score:.1f}")
+                    elif change < 0:
+                        st.warning(f"📉 **Decline:** {change:.1f} points")
+                        st.caption(f"From {first_score:.1f} → {last_score:.1f}")
+                    else:
+                        st.info(f"➡️ **No change:** Score remained at {first_score:.1f}")
+            else:
+                st.info("No CBSE exams taken")
         
-        # Add legend explanation
-        st.markdown("""
-        **📊 Readiness Zones:**
-        - 🟢 **Green Zone (66+)**: Step 1 Ready
-        - 🟡 **Yellow Zone (62-65)**: Approaching Readiness  
-        - 🔴 **Red Zone (<62)**: Below Readiness Threshold
-        """)
+        # CBSSA Chart
+        with col2:
+            cbssa_data = student_exams[student_exams['exam_type'] == 'CBSSA'].copy()
+            if not cbssa_data.empty:
+                st.markdown(f"**CBSSA Progression** ({len(cbssa_data)} exams)")
+                
+                # Add exam number for clarity
+                cbssa_data['exam_number'] = range(1, len(cbssa_data) + 1)
+                cbssa_data['exam_label'] = 'Exam ' + cbssa_data['exam_number'].astype(str)
+                
+                # Create the line chart
+                line_chart = alt.Chart(cbssa_data).mark_line(
+                    point=True,
+                    strokeWidth=3,
+                    color='#F18F01'
+                ).encode(
+                    x=alt.X('exam_label:O',
+                           title='Exam Sequence',
+                           sort=None),
+                    y=alt.Y('total_score:Q',
+                           title='Score',
+                           scale=alt.Scale(domain=[0, 100])),
+                    tooltip=[
+                        alt.Tooltip('exam_label:N', title='Exam'),
+                        alt.Tooltip('exam_date:T', title='Date', format='%B %d, %Y'),
+                        alt.Tooltip('total_score:Q', title='Score', format='.1f')
+                    ]
+                )
+                
+                # Add points
+                points = alt.Chart(cbssa_data).mark_circle(
+                    size=100,
+                    color='#F18F01'
+                ).encode(
+                    x=alt.X('exam_label:O', sort=None),
+                    y='total_score:Q',
+                    tooltip=[
+                        alt.Tooltip('exam_label:N', title='Exam'),
+                        alt.Tooltip('exam_date:T', title='Date', format='%B %d, %Y'),
+                        alt.Tooltip('total_score:Q', title='Score', format='.1f')
+                    ]
+                )
+                
+                # Add reference lines
+                threshold_high = alt.Chart(pd.DataFrame({'y': [66]})).mark_rule(
+                    strokeDash=[5, 5],
+                    color='green',
+                    opacity=0.5
+                ).encode(y='y:Q')
+                
+                threshold_low = alt.Chart(pd.DataFrame({'y': [62]})).mark_rule(
+                    strokeDash=[5, 5],
+                    color='orange',
+                    opacity=0.5
+                ).encode(y='y:Q')
+                
+                # Combine
+                combined_chart = (line_chart + points + threshold_high + threshold_low).properties(
+                    width=300,
+                    height=250,
+                    title='CBSSA Score Trend (Chronological)'
+                )
+                
+                st.altair_chart(combined_chart, use_container_width=True)
+                
+                # Calculate and display change score
+                if len(cbssa_data) > 1:
+                    first_score = cbssa_data.iloc[0]['total_score']
+                    last_score = cbssa_data.iloc[-1]['total_score']
+                    change = last_score - first_score
+                    
+                    if change > 0:
+                        st.success(f"📈 **Improvement:** +{change:.1f} points")
+                        st.caption(f"From {first_score:.1f} → {last_score:.1f}")
+                    elif change < 0:
+                        st.warning(f"📉 **Decline:** {change:.1f} points")
+                        st.caption(f"From {first_score:.1f} → {last_score:.1f}")
+                    else:
+                        st.info(f"➡️ **No change:** Score remained at {first_score:.1f}")
+            else:
+                st.info("No CBSSA exams taken")
+    
+    else:
+        # Single exam type - create full-width chart
+        exam_type = exam_types_available[0]
+        st.markdown(f"**{exam_type} Score Progression** ({len(student_exams)} exams)")
         
-        # Log chart interaction with separation tracking
-        log_feature_interaction(current_user, "score_trend_chart", {
-            "student_id": selected_id,
-            "num_exams": len(student_exams),
-            "chart_enhanced": "readiness_zones_added_separated_constructs",
-            "exam_types": list(exam_types_available),
-            "charts_separated": len(exam_types_available) > 1
+        # Prepare data with exam numbering
+        student_exams['exam_number'] = range(1, len(student_exams) + 1)
+        student_exams['exam_label'] = 'Exam ' + student_exams['exam_number'].astype(str)
+        
+        # Determine color based on exam type
+        chart_color = '#2E86AB' if exam_type == 'CBSE' else '#F18F01'
+        
+        # Create the main line chart
+        line_chart = alt.Chart(student_exams).mark_line(
+            point=True,
+            strokeWidth=3,
+            color=chart_color
+        ).encode(
+            x=alt.X('exam_label:O',
+                   title='Exam Sequence (Chronological Order)',
+                   sort=None),
+            y=alt.Y('total_score:Q',
+                   title='Score',
+                   scale=alt.Scale(domain=[0, 100])),
+            tooltip=[
+                alt.Tooltip('exam_label:N', title='Exam'),
+                alt.Tooltip('exam_date:T', title='Date', format='%B %d, %Y'),
+                alt.Tooltip('total_score:Q', title='Score', format='.1f'),
+                alt.Tooltip('exam_type:N', title='Exam Type')
+            ]
+        )
+        
+        # Add larger points for better visibility
+        points = alt.Chart(student_exams).mark_circle(
+            size=120,
+            color=chart_color
+        ).encode(
+            x=alt.X('exam_label:O', sort=None),
+            y='total_score:Q',
+            tooltip=[
+                alt.Tooltip('exam_label:N', title='Exam'),
+                alt.Tooltip('exam_date:T', title='Date', format='%B %d, %Y'),
+                alt.Tooltip('total_score:Q', title='Score', format='.1f')
+            ]
+        )
+        
+        # Add text labels on points (optional - for scores)
+        text = alt.Chart(student_exams).mark_text(
+            dy=-15,
+            fontSize=10,
+            color='gray'
+        ).encode(
+            x=alt.X('exam_label:O', sort=None),
+            y='total_score:Q',
+            text=alt.Text('total_score:Q', format='.0f')
+        )
+        
+        # Reference lines for thresholds
+        threshold_high = alt.Chart(pd.DataFrame({'y': [66]})).mark_rule(
+            strokeDash=[5, 5],
+            color='green',
+            opacity=0.5,
+            strokeWidth=2
+        ).encode(y='y:Q')
+        
+        threshold_low = alt.Chart(pd.DataFrame({'y': [62]})).mark_rule(
+            strokeDash=[5, 5],
+            color='orange',
+            opacity=0.5,
+            strokeWidth=2
+        ).encode(y='y:Q')
+        
+        # Add text annotations for thresholds
+        threshold_text_data = pd.DataFrame({
+            'y': [66, 62],
+            'label': ['Ready (66+)', 'Approaching (62+)'],
+            'x': ['Exam 1', 'Exam 1']  # Position at first exam
         })
+        
+        threshold_labels = alt.Chart(threshold_text_data).mark_text(
+            align='left',
+            dx=5,
+            fontSize=9,
+            color='gray'
+        ).encode(
+            x='x:O',
+            y='y:Q',
+            text='label:N'
+        )
+        
+        # Combine all layers
+        combined_chart = (line_chart + points + text + 
+                         threshold_high + threshold_low + threshold_labels).properties(
+            width=700,
+            height=350,
+            title=f'{exam_type} Score Progression (Earliest to Most Recent)'
+        )
+        
+        st.altair_chart(combined_chart, use_container_width=True)
+        
+        # Show progression statistics
+        if len(student_exams) > 1:
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                first_score = student_exams.iloc[0]['total_score']
+                last_score = student_exams.iloc[-1]['total_score']
+                change = last_score - first_score
+                
+                if change > 0:
+                    st.metric("Overall Change", f"+{change:.1f} points", "📈 Improving")
+                elif change < 0:
+                    st.metric("Overall Change", f"{change:.1f} points", "📉 Declining")
+                else:
+                    st.metric("Overall Change", "No change", "➡️ Stable")
+            
+            with col2:
+                avg_score = student_exams['total_score'].mean()
+                st.metric("Average Score", f"{avg_score:.1f}")
+            
+            with col3:
+                # Calculate trend (simple linear regression slope)
+                x = range(len(student_exams))
+                y = student_exams['total_score'].values
+                slope = np.polyfit(x, y, 1)[0]
+                
+                if slope > 0.5:
+                    trend = "Upward trend"
+                elif slope < -0.5:
+                    trend = "Downward trend"
+                else:
+                    trend = "Stable"
+                
+                st.metric("Trend", trend, f"{slope:.2f} pts/exam")
+    
+    # Add legend explanation
+    st.markdown("""
+    ---
+    **📊 How to Read This Chart:**
+    - **X-axis**: Exams in chronological order (Exam 1 = earliest, last exam = most recent)
+    - **Y-axis**: Exam scores (0-100 scale)
+    - **Green line (66+)**: Step 1 Ready threshold
+    - **Orange line (62+)**: Approaching Readiness threshold
+    - **Change Score**: Shows improvement or decline from first to last exam
+    """)
+    
+    # Log the interaction
+    log_feature_interaction(current_user, "improved_score_trend_chart", {
+        "student_id": selected_id,
+        "num_exams": len(student_exams),
+        "exam_types": list(exam_types_available),
+        "visualization": "chronological_line_chart"
+    })
 
     
     
@@ -1901,8 +2052,10 @@ elif page == "Individual Student Dashboard":
                     })
                 
                 # Create separate charts for each exam type (addressing feedback about separating CBSE/CBSSA)
-                exam_types = epc_long['exam_type'].unique()
                 
+                
+                exam_types = epc_long['exam_type'].unique()
+
                 if len(exam_types) > 1:
                     st.markdown("**📊 Content Performance by Exam Type**")
                     st.info("💡 **Note**: CBSE and CBSSA assess different constructs and scores are not directly comparable")
@@ -1911,85 +2064,409 @@ elif page == "Individual Student Dashboard":
                         exam_epc = epc_long[epc_long['exam_type'] == exam_type].copy()
                         
                         if not exam_epc.empty:
-                            st.markdown(f"**{exam_type} Content Areas** (n={len(exam_epc)})")
+                            # Sort by date to ensure chronological order
+                            if 'exam_date' in exam_epc.columns:
+                                exam_epc['exam_date'] = pd.to_datetime(exam_epc['exam_date'])
+                                exam_epc = exam_epc.sort_values('exam_date')
                             
-                            # Create chart
-                            chart_color = 'steelblue' if exam_type == 'CBSE' else 'darkgreen'
+                            # Check how many unique attempts per content area
+                            attempts_per_area = exam_epc.groupby('EPC').size().iloc[0] if not exam_epc.empty else 1
+                            unique_attempts = len(exam_epc['exam_date'].unique()) if 'exam_date' in exam_epc.columns else 1
                             
-                            epc_chart = alt.Chart(exam_epc).mark_bar(
-                                color=chart_color
-                            ).encode(
-                                x=alt.X("EPC:N", sort="-y", title="Content Area", axis=alt.Axis(labelAngle=-45)),
-                                y=alt.Y("Score:Q", title="Score %"),
-                                tooltip=["EPC:N", "Score:Q"]
-                            ).properties(
-                                width=600,
-                                height=300,
-                                title=f"{exam_type} Content Area Performance"
-                            )
-                            
-                            st.altair_chart(epc_chart, use_container_width=True)
-                            
-                            # Enhanced Top areas for improvement with better data validation
-                            st.markdown(f"**{exam_type} - Top Areas for Improvement:**")
-                            weakest_epcs = exam_epc.sort_values("Score").head(5)
-                            
-                            if not weakest_epcs.empty and weakest_epcs["Score"].sum() > 0:  # Ensure we have valid scores
-                                for _, row in weakest_epcs.iterrows():
-                                    score = row['Score']
-                                    if score == 0:
-                                        st.markdown(f"🔧 **{row['EPC']}**: Data unavailable (synthetic data issue)")
-                                    elif score < 70:
-                                        st.markdown(f"🔴 **{row['EPC']}**: {score:.1f}% - High Priority")
-                                    elif score < 80:
-                                        st.markdown(f"🟡 **{row['EPC']}**: {score:.1f}% - Monitor")
+                            if unique_attempts > 1 and attempts_per_area > 1:
+                                # Multiple attempts - SIMPLIFIED COLOR VERSION
+                                
+                                # Create attempt labels in chronological order
+                                if 'exam_round' in exam_epc.columns:
+                                    exam_epc = exam_epc.sort_values(['exam_date', 'exam_round'])
+                                    exam_epc['attempt_label'] = exam_epc['exam_round'].astype(str).str.replace('MS', 'ME')
+                                    # Fix chronological order
+                                    attempt_order = sorted(exam_epc['attempt_label'].unique(), 
+                                                        key=lambda x: exam_epc[exam_epc['attempt_label'] == x]['exam_date'].iloc[0])
+                                    attempt_sequence = " → ".join(attempt_order)
+                                else:
+                                    exam_epc['attempt_number'] = exam_epc.groupby('EPC')['exam_date'].rank(method='dense').astype(int)
+                                    exam_epc['attempt_label'] = 'Attempt ' + exam_epc['attempt_number'].astype(str)
+                                    attempt_sequence = " → ".join([f"Attempt {i+1}" for i in range(unique_attempts)])
+                                
+                                # SINGLE TITLE
+                                st.markdown(f"### 📈 {exam_type} Content Area Progression ({unique_attempts} attempts)")
+                                st.info(f"📅 **Chronological Progress**: {attempt_sequence}")
+                                
+                                # Calculate performance trends for each content area
+                                performance_summary = []
+                                for content_area in exam_epc['EPC'].unique():
+                                    area_data = exam_epc[exam_epc['EPC'] == content_area].sort_values('exam_date')
+                                    if len(area_data) > 1:
+                                        first_score = area_data.iloc[0]['Score']
+                                        latest_score = area_data.iloc[-1]['Score']
+                                        change = latest_score - first_score
+                                        
+                                        # Trend indicators (text only, no colors)
+                                        if change > 5:
+                                            trend_arrow = "↗️"
+                                            trend_text = f"+{change:.1f}%"
+                                        elif change < -5:
+                                            trend_arrow = "↘️"
+                                            trend_text = f"{change:.1f}%"
+                                        else:
+                                            trend_arrow = "→"
+                                            trend_text = f"{change:+.1f}%"
+                                        
+                                        # Performance badge ONLY (single color meaning)
+                                        if latest_score >= 80:
+                                            perf_badge = "🟢"
+                                            perf_level = "Strong"
+                                            perf_color = "#28a745"
+                                        elif latest_score >= 60:
+                                            perf_badge = "🟡"
+                                            perf_level = "Monitor"
+                                            perf_color = "#ffc107"
+                                        else:
+                                            perf_badge = "🔴"
+                                            perf_level = "Priority"
+                                            perf_color = "#dc3545"
+                                        
+                                        performance_summary.append({
+                                            'EPC': content_area,
+                                            'First_Score': first_score,
+                                            'Latest_Score': latest_score,
+                                            'Change': change,
+                                            'Trend_Arrow': trend_arrow,
+                                            'Trend_Text': trend_text,
+                                            'Perf_Badge': perf_badge,
+                                            'Perf_Level': perf_level,
+                                            'Perf_Color': perf_color,
+                                            'Area_Data': area_data
+                                        })
+                                
+                                # Sort by latest performance (strongest first)
+                                performance_summary.sort(key=lambda x: x['Latest_Score'], reverse=True)
+                                
+                                # Create clean, dashboard-style layout
+                                st.markdown("**📊 Performance Dashboard:**")
+                                
+                                # Show areas with SIMPLIFIED color coding
+                                for i, summary in enumerate(performance_summary):
+                                    area = summary['EPC']
+                                    area_data = summary['Area_Data']
+                                    
+                                    # Ensure chronological order for charts
+                                    area_data = area_data.sort_values('exam_date')
+                                    
+                                    # Create container for each content area
+                                    with st.container():
+                                        col1, col2, col3 = st.columns([1, 3, 1])
+                                        
+                                        with col1:
+                                            # Area name (NO color coding - just black text)
+                                            st.markdown(f"**{area}**")
+                                            st.markdown(f"{summary['Trend_Arrow']} {summary['Trend_Text']}")
+                                            
+                                        with col2:
+                                            # NEUTRAL GRAY bars - no trend colors
+                                            mini_chart = alt.Chart(area_data).mark_bar(
+                                                color='#6c757d',  # Neutral gray
+                                                size=40
+                                            ).encode(
+                                                x=alt.X('attempt_label:N', 
+                                                    title=None,
+                                                    sort=alt.SortField(field='exam_date', order='ascending'),
+                                                    axis=alt.Axis(labelAngle=0, labelFontSize=11)),
+                                                y=alt.Y('Score:Q', 
+                                                    title=None,
+                                                    scale=alt.Scale(domain=[0, 100]),
+                                                    axis=alt.Axis(labelFontSize=10)),
+                                                tooltip=[
+                                                    alt.Tooltip('attempt_label:N', title='Attempt'),
+                                                    alt.Tooltip('Score:Q', title='Score', format='.1f'),
+                                                    alt.Tooltip('exam_date:T', title='Date', format='%B %d, %Y')
+                                                ]
+                                            ).properties(
+                                                width=300,
+                                                height=80
+                                            )
+                                            
+                                            st.altair_chart(mini_chart, use_container_width=True)
+                                        
+                                        with col3:
+                                            # ONLY performance badge (single color meaning)
+                                            st.markdown(f"**Latest: {summary['Latest_Score']:.1f}%**")
+                                            st.markdown(f"{summary['Perf_Badge']} {summary['Perf_Level']}")
+                                    
+                                    # Add subtle separator except for last item
+                                    if i < len(performance_summary) - 1:
+                                        st.markdown("---")
+                                
+                                # Summary insights
+                                st.markdown("### 🎯 Key Insights")
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.markdown("**🏆 Most Improved Areas:**")
+                                    # Sort by improvement for this section
+                                    improvement_sorted = sorted(performance_summary, key=lambda x: x['Change'], reverse=True)
+                                    top_improved = [s for s in improvement_sorted if s['Change'] > 0][:3]
+                                    if top_improved:
+                                        for summary in top_improved:
+                                            st.success(f"• **{summary['EPC']}**: {summary['First_Score']:.1f}% → {summary['Latest_Score']:.1f}% ({summary['Trend_Text']})")
                                     else:
-                                        st.markdown(f"🟢 **{row['EPC']}**: {score:.1f}% - Acceptable")
+                                        st.info("• No areas showed improvement")
+                                
+                                with col2:
+                                    st.markdown("**📉 Priority Areas:**")
+                                    priority_areas = [s for s in performance_summary if s['Latest_Score'] < 60][:3]
+                                    if priority_areas:
+                                        for summary in priority_areas:
+                                            st.error(f"• **{summary['EPC']}**: {summary['Latest_Score']:.1f}% - Needs attention")
+                                    else:
+                                        declining_areas = [s for s in performance_summary if s['Change'] < -5][:3]
+                                        if declining_areas:
+                                            for summary in declining_areas:
+                                                st.warning(f"• **{summary['EPC']}**: {summary['Trend_Text']} - Monitor decline")
+                                        else:
+                                            st.success("• No immediate priority areas identified")
+                            
                             else:
-                                st.warning("⚠️ **Areas for Improvement data unavailable** - this may be due to synthetic data limitations or data processing issues")
-                                st.info("💡 **For prototype purposes**: This section will show the lowest-performing content areas when real data is available")
+                                # Single attempt - SIMPLIFIED
+                                st.markdown(f"### 📊 {exam_type} Content Area Performance")
+                                st.info("📋 **Single Assessment** - No progression tracking available")
+                                
+                                # Group by content area for single attempt
+                                if attempts_per_area == 1:
+                                    display_data = exam_epc.groupby('EPC')['Score'].mean().reset_index()
+                                else:
+                                    display_data = exam_epc
+                                
+                                # Add performance categorization (ONLY color meaning)
+                                display_data['Performance_Category'] = display_data['Score'].apply(
+                                    lambda x: 'Strong' if x >= 80 else 'Monitor' if x >= 60 else 'Priority'
+                                )
+                                display_data['Badge'] = display_data['Performance_Category'].map({
+                                    'Strong': '🟢',
+                                    'Monitor': '🟡', 
+                                    'Priority': '🔴'
+                                })
+                                
+                                # Sort by performance
+                                display_data = display_data.sort_values('Score', ascending=False)
+                                
+                                # Create color-coded horizontal bar chart (color = current performance only)
+                                color_scale = alt.Scale(
+                                    domain=['Priority', 'Monitor', 'Strong'],
+                                    range=['#dc3545', '#ffc107', '#28a745']
+                                )
+                                
+                                epc_chart = alt.Chart(display_data).mark_bar().encode(
+                                    x=alt.X("Score:Q", 
+                                        title="Score %",
+                                        scale=alt.Scale(domain=[0, 100])),
+                                    y=alt.Y("EPC:N", 
+                                        sort=alt.SortField(field='Score', order='descending'),
+                                        title="Content Area"),
+                                    color=alt.Color('Performance_Category:N',
+                                                scale=color_scale,
+                                                legend=alt.Legend(title="Current Performance")),
+                                    tooltip=["EPC:N", "Score:Q", "Performance_Category:N"]
+                                ).properties(
+                                    width=600,
+                                    height=max(300, len(display_data) * 25),
+                                    title=f"{exam_type} Content Area Performance"
+                                )
+                                
+                                st.altair_chart(epc_chart, use_container_width=True)
+                                
+                                # Performance summary
+                                st.markdown("**📋 Current Performance Summary:**")
+                                
+                                col1, col2, col3 = st.columns(3)
+                                
+                                strong_count = len(display_data[display_data['Performance_Category'] == 'Strong'])
+                                monitor_count = len(display_data[display_data['Performance_Category'] == 'Monitor'])
+                                priority_count = len(display_data[display_data['Performance_Category'] == 'Priority'])
+                                
+                                with col1:
+                                    st.metric("🟢 Strong Performance", f"{strong_count} areas", help="Score ≥ 80%")
+                                
+                                with col2:
+                                    st.metric("🟡 Monitor Areas", f"{monitor_count} areas", help="Score 60-79%")
+                                
+                                with col3:
+                                    st.metric("🔴 Priority Areas", f"{priority_count} areas", help="Score < 60%")
+                                
+                                # Show priority areas if any
+                                if priority_count > 0:
+                                    st.markdown("**🔴 Areas Requiring Immediate Attention:**")
+                                    priority_areas = display_data[display_data['Performance_Category'] == 'Priority']
+                                    for _, row in priority_areas.iterrows():
+                                        st.error(f"• **{row['EPC']}**: {row['Score']:.1f}%")
+                            
+                            st.markdown("---")
+                        
                         else:
                             st.warning(f"No {exam_type} data to display")
+
                 else:
-                    # Single exam type
-                    exam_type = exam_types[0]
-                    st.markdown(f"**{exam_type} Content Areas** (n={len(epc_long)})")
+                    # Single exam type case with same simplified approach
+                    exam_type = exam_types[0] if len(exam_types) > 0 else "Unknown"
                     
-                    chart_color = 'steelblue' if exam_type == 'CBSE' else 'darkgreen'
+                    # Sort by date to ensure chronological order
+                    if 'exam_date' in epc_long.columns:
+                        epc_long['exam_date'] = pd.to_datetime(epc_long['exam_date'])
+                        epc_long = epc_long.sort_values('exam_date')
                     
-                    epc_chart = alt.Chart(epc_long).mark_bar(
-                        color=chart_color
-                    ).encode(
-                        x=alt.X("EPC:N", sort="-y", title="Content Area", axis=alt.Axis(labelAngle=-45)),
-                        y=alt.Y("Score:Q", title="Score %"),
-                        tooltip=["EPC:N", "Score:Q"]
-                    ).properties(
-                        width=600,
-                        height=300,
-                        title="Content Area Performance"
-                    )
+                    # Check attempts
+                    attempts_per_area = epc_long.groupby('EPC').size().iloc[0] if not epc_long.empty else 1
+                    unique_attempts = len(epc_long['exam_date'].unique()) if 'exam_date' in epc_long.columns else 1
                     
-                    st.altair_chart(epc_chart, use_container_width=True)
-                    
-                    # Top areas for improvement
-                    st.markdown("**Top Areas for Improvement:**")
-                    weakest_epcs = epc_long.sort_values("Score").head(5)
-                    for _, row in weakest_epcs.iterrows():
-                        if row['Score'] < 70:
-                            st.markdown(f"🔴 **{row['EPC']}**: {row['Score']:.1f}% - High Priority")
-                        elif row['Score'] < 80:
-                            st.markdown(f"🟡 **{row['EPC']}**: {row['Score']:.1f}% - Monitor")
+                    if unique_attempts > 1 and attempts_per_area > 1:
+                        # Apply same simplified approach for single exam type
+                        
+                        # Create attempt labels with proper chronological order
+                        if 'exam_round' in epc_long.columns:
+                            epc_long = epc_long.sort_values(['exam_date', 'exam_round'])
+                            epc_long['attempt_label'] = epc_long['exam_round'].astype(str).str.replace('MS', 'ME')
+                            attempt_order = sorted(epc_long['attempt_label'].unique(), 
+                                                key=lambda x: epc_long[epc_long['attempt_label'] == x]['exam_date'].iloc[0])
+                            attempt_sequence = " → ".join(attempt_order)
                         else:
-                            st.markdown(f"🟢 **{row['EPC']}**: {row['Score']:.1f}% - Acceptable")
+                            epc_long['attempt_number'] = epc_long.groupby('EPC')['exam_date'].rank(method='dense').astype(int)
+                            epc_long['attempt_label'] = 'Attempt ' + epc_long['attempt_number'].astype(str)
+                            attempt_sequence = " → ".join([f"Attempt {i+1}" for i in range(unique_attempts)])
+                        
+                        # SINGLE TITLE
+                        st.markdown(f"### 📈 {exam_type} Content Area Progression ({unique_attempts} attempts)")
+                        st.info(f"📅 **Chronological Progress**: {attempt_sequence}")
+                        
+                        # Same performance analysis with simplified colors
+                        performance_summary = []
+                        for content_area in epc_long['EPC'].unique():
+                            area_data = epc_long[epc_long['EPC'] == content_area].sort_values('exam_date')
+                            if len(area_data) > 1:
+                                first_score = area_data.iloc[0]['Score']
+                                latest_score = area_data.iloc[-1]['Score']
+                                change = latest_score - first_score
+                                
+                                # Trend indicators (text only)
+                                if change > 5:
+                                    trend_arrow = "↗️"
+                                    trend_text = f"+{change:.1f}%"
+                                elif change < -5:
+                                    trend_arrow = "↘️"
+                                    trend_text = f"{change:.1f}%"
+                                else:
+                                    trend_arrow = "→"
+                                    trend_text = f"{change:+.1f}%"
+                                
+                                # Performance badge ONLY
+                                if latest_score >= 80:
+                                    perf_badge = "🟢"
+                                    perf_level = "Strong"
+                                elif latest_score >= 60:
+                                    perf_badge = "🟡"
+                                    perf_level = "Monitor"
+                                else:
+                                    perf_badge = "🔴"
+                                    perf_level = "Priority"
+                                
+                                performance_summary.append({
+                                    'EPC': content_area,
+                                    'First_Score': first_score,
+                                    'Latest_Score': latest_score,
+                                    'Change': change,
+                                    'Trend_Arrow': trend_arrow,
+                                    'Trend_Text': trend_text,
+                                    'Perf_Badge': perf_badge,
+                                    'Perf_Level': perf_level,
+                                    'Area_Data': area_data
+                                })
+                        
+                        performance_summary.sort(key=lambda x: x['Latest_Score'], reverse=True)
+                        
+                        # Same simplified dashboard layout
+                        st.markdown("**📊 Performance Dashboard:**")
+                        
+                        for i, summary in enumerate(performance_summary):
+                            area = summary['EPC']
+                            area_data = summary['Area_Data'].sort_values('exam_date')
+                            
+                            with st.container():
+                                col1, col2, col3 = st.columns([1, 3, 1])
+                                
+                                with col1:
+                                    st.markdown(f"**{area}**")  # No color coding
+                                    st.markdown(f"{summary['Trend_Arrow']} {summary['Trend_Text']}")
+                                    
+                                with col2:
+                                    # Neutral gray bars
+                                    mini_chart = alt.Chart(area_data).mark_bar(
+                                        color='#6c757d',  # Neutral gray
+                                        size=40
+                                    ).encode(
+                                        x=alt.X('attempt_label:N', 
+                                            title=None, 
+                                            sort=alt.SortField(field='exam_date', order='ascending'),
+                                            axis=alt.Axis(labelAngle=0, labelFontSize=11)),
+                                        y=alt.Y('Score:Q', 
+                                            title=None, 
+                                            scale=alt.Scale(domain=[0, 100]), 
+                                            axis=alt.Axis(labelFontSize=10)),
+                                        tooltip=[
+                                            alt.Tooltip('attempt_label:N', title='Attempt'),
+                                            alt.Tooltip('Score:Q', title='Score', format='.1f')
+                                        ]
+                                    ).properties(width=300, height=80)
+                                    
+                                    st.altair_chart(mini_chart, use_container_width=True)
+                                
+                                with col3:
+                                    st.markdown(f"**Latest: {summary['Latest_Score']:.1f}%**")
+                                    st.markdown(f"{summary['Perf_Badge']} {summary['Perf_Level']}")
+                            
+                            if i < len(performance_summary) - 1:
+                                st.markdown("---")
+                    
+                    else:
+                        # Single attempt with simplified approach (same as above)
+                        st.markdown(f"### 📊 {exam_type} Content Area Performance")
+                        st.info("📋 **Single Assessment** - No progression tracking available")
+                        
+                        display_data = epc_long.groupby('EPC')['Score'].mean().reset_index()
+                        
+                        display_data['Performance_Category'] = display_data['Score'].apply(
+                            lambda x: 'Strong' if x >= 80 else 'Monitor' if x >= 60 else 'Priority'
+                        )
+                        
+                        display_data = display_data.sort_values('Score', ascending=False)
+                        
+                        color_scale = alt.Scale(
+                            domain=['Priority', 'Monitor', 'Strong'],
+                            range=['#dc3545', '#ffc107', '#28a745']
+                        )
+                        
+                        epc_chart = alt.Chart(display_data).mark_bar().encode(
+                            x=alt.X("Score:Q", title="Score %", scale=alt.Scale(domain=[0, 100])),
+                            y=alt.Y("EPC:N", sort=alt.SortField(field='Score', order='descending'), title="Content Area"),
+                            color=alt.Color('Performance_Category:N', scale=color_scale, legend=alt.Legend(title="Current Performance")),
+                            tooltip=["EPC:N", "Score:Q", "Performance_Category:N"]
+                        ).properties(
+                            width=600,
+                            height=max(300, len(display_data) * 25),
+                            title="Content Area Performance"
+                        )
+                        
+                        st.altair_chart(epc_chart, use_container_width=True)
                 
                 # Log EPC interaction
                 log_feature_interaction(current_user, "epc_analysis", {
-                    "student_id": selected_id,
-                    "num_content_areas": len(epc_long["EPC"].unique()),
-                    "weakest_area": epc_long.sort_values("Score").iloc[0]["EPC"] if not epc_long.empty else None,
-                    "exam_types": list(exam_types),
-                    "separated_by_exam_type": len(exam_types) > 1
-                })
+                "student_id": selected_id,
+                "num_content_areas": len(epc_long["EPC"].unique()),
+                "weakest_area": epc_long.sort_values("Score").iloc[0]["EPC"] if not epc_long.empty else None,
+                "exam_types": list(exam_types),
+                "separated_by_exam_type": len(exam_types) > 1,
+                "ux_version": "simplified_color_coding_option_a"
+            })
             else:
                 st.warning("⚠️ **No valid EPC scores found**. This could mean:")
                 st.markdown("- All scores are 0 (indicating missing data)")
@@ -2003,163 +2480,235 @@ elif page == "Individual Student Dashboard":
 
     # Enhanced QLF - Question-Level Feedback
     st.subheader("🔍 Question-Level Performance Analysis")
+
     if not student_qlf.empty:
         # Ensure 'correct' column is numeric and clean data
         student_qlf["correct"] = pd.to_numeric(student_qlf["correct"], errors='coerce')
         student_qlf["national_pct_correct"] = pd.to_numeric(student_qlf["national_pct_correct"], errors='coerce')
-       
+    
         # Remove rows with invalid data
         student_qlf_clean = student_qlf.dropna(subset=["correct", "physician_competency", "content_topic", "content_description"]).copy()
-       
+    
         if not student_qlf_clean.empty:
-            # Quick summary metrics
-            col1, col2, col3, col4 = st.columns(4)
-           
-            total_questions = len(student_qlf_clean)
-            correct_answers = student_qlf_clean["correct"].sum()
-            overall_pct = (correct_answers / total_questions) * 100
-            below_national = len(student_qlf_clean[(student_qlf_clean["correct"] == 0) &
-                                                   (student_qlf_clean["national_pct_correct"] >= 70)])
-           
-            with col1:
-                st.metric("Total Questions", total_questions)
-            with col2:
-                st.metric("Overall Correct", f"{correct_answers}/{total_questions}")
-            with col3:
-                st.metric("Overall %", f"{overall_pct:.1f}%")
-            with col4:
-                st.metric("Missed High-Yield", below_national, help="Questions missed with >70% national average")
-           
-            # Filtering options
-            st.markdown("---")
+            # OPTION B: Add attempt selection dropdown
+            st.markdown("#### 📋 Select Exam Attempt to Analyze")
+            
+            # Get unique exam attempts for this student
+            if 'exam_round' in student_qlf_clean.columns:
+                attempt_col = 'exam_round'
+            elif 'exam_take' in student_qlf_clean.columns:
+                attempt_col = 'exam_take'
+            elif 'Exam Take' in student_qlf_clean.columns:
+                attempt_col = 'Exam Take'
+            else:
+                # Fallback - look for any column that might indicate attempts
+                possible_cols = [col for col in student_qlf_clean.columns if 'exam' in col.lower() or 'attempt' in col.lower() or 'round' in col.lower()]
+                attempt_col = possible_cols[0] if possible_cols else None
+            
+            if attempt_col and attempt_col in student_qlf_clean.columns:
+                # Get unique attempts and sort them
+                unique_attempts = sorted(student_qlf_clean[attempt_col].unique())
+                
+                if len(unique_attempts) > 1:
+                    # Multiple attempts - show dropdown
+                    selected_attempt = st.selectbox(
+                        "📝 Analyze CBSE Questions From:",
+                        options=unique_attempts,
+                        index=len(unique_attempts)-1,  # Default to most recent
+                        help="Select which exam attempt to analyze. Showing most recent by default."
+                    )
+                    
+                    # Filter data to selected attempt
+                    attempt_data = student_qlf_clean[student_qlf_clean[attempt_col] == selected_attempt].copy()
+                    
+                    st.info(f"📊 **Analyzing**: {selected_attempt} ({len(attempt_data)} questions)")
+                    
+                else:
+                    # Single attempt
+                    selected_attempt = unique_attempts[0]
+                    attempt_data = student_qlf_clean.copy()
+                    st.info(f"📊 **Single Attempt**: {selected_attempt} ({len(attempt_data)} questions)")
+            else:
+                # No attempt column found - use all data
+                attempt_data = student_qlf_clean.copy()
+                st.info(f"📊 **All Available Questions**: {len(attempt_data)} questions")
+                st.warning("⚠️ Could not identify exam attempts in data - showing all questions")
+            
+            # Add VALID summary stats by construct (psychometrically sound)
+            st.markdown("#### 📊 Performance Summary by Physician Competency")
+            
+            # Performance by Physician Competency (individual constructs)
+            if 'physician_competency' in attempt_data.columns:
+                competency_summary = attempt_data.groupby('physician_competency').agg({
+                    'correct': ['count', 'sum']
+                }).round(1)
+                competency_summary.columns = ['Total_Questions', 'Correct_Answers']
+                competency_summary['Percent_Correct'] = (competency_summary['Correct_Answers'] / competency_summary['Total_Questions'] * 100).round(1)
+                competency_summary = competency_summary.sort_values('Percent_Correct', ascending=False)
+                
+                # Display as metrics in columns
+                if len(competency_summary) <= 4:
+                    cols = st.columns(len(competency_summary))
+                    for i, (competency, row) in enumerate(competency_summary.iterrows()):
+                        with cols[i]:
+                            st.metric(
+                                label=f"📋 {competency}",
+                                value=f"{row['Percent_Correct']:.1f}%",
+                                delta=f"{int(row['Correct_Answers'])}/{int(row['Total_Questions'])}"
+                            )
+                else:
+                    # Too many competencies - show as a clean table
+                    summary_display = competency_summary.copy()
+                    summary_display['Performance'] = summary_display.apply(
+                        lambda x: f"{x['Correct_Answers']:.0f}/{x['Total_Questions']:.0f} ({x['Percent_Correct']:.1f}%)", axis=1
+                    )
+                    
+                    st.dataframe(
+                        summary_display[['Performance']].rename(columns={'Performance': 'Questions Correct (%)'}),
+                        use_container_width=True
+                    )
+            
+            # Quick attempt overview
+            total_q = len(attempt_data)
+            total_correct = attempt_data['correct'].sum()
+            high_yield_missed = len(attempt_data[(attempt_data['correct'] == 0) & (attempt_data['national_pct_correct'] >= 70)]) if 'national_pct_correct' in attempt_data.columns else 0
+            
+            st.markdown("#### 📈 Quick Overview")
             col1, col2, col3 = st.columns(3)
-           
+            
+            with col1:
+                st.metric("Questions in This Attempt", total_q)
+            with col2:
+                st.metric("Total Correct", f"{int(total_correct)}/{total_q}")
+            with col3:
+                if 'national_pct_correct' in attempt_data.columns:
+                    st.metric("Missed High-Yield", high_yield_missed, help="Questions missed with >70% national average")
+            
+            st.markdown("---")
+            
+            # Keep the useful filtering options (these are good)
+            col1, col2, col3 = st.columns(3)
+        
             with col1:
                 show_filter = st.selectbox(
                     "Show Questions",
                     ["All Questions", "Incorrect Only", "Below National Average"],
                     help="Filter questions by performance"
                 )
-           
+            
             with col2:
-                competency_filter = st.selectbox(
-                    "Physician Competency",
-                    ["All"] + sorted(student_qlf_clean["physician_competency"].unique()),
-                    help="Filter by competency area"
-                )
-           
+                if 'physician_competency' in attempt_data.columns:
+                    competency_options = ["All Competencies"] + sorted(attempt_data['physician_competency'].dropna().unique().tolist())
+                    selected_competency = st.selectbox(
+                        "Physician Competency",
+                        options=competency_options,
+                        help="Filter by specific competency area"
+                    )
+                else:
+                    selected_competency = "All Competencies"
+            
             with col3:
-                topic_filter = st.selectbox(
-                    "Content Topic",
-                    ["All"] + sorted(student_qlf_clean["content_topic"].unique()),
-                    help="Filter by content topic"
-                )
-           
+                if 'content_topic' in attempt_data.columns:
+                    topic_options = ["All Topics"] + sorted(attempt_data['content_topic'].dropna().unique().tolist())
+                    selected_topic = st.selectbox(
+                        "Content Topic",
+                        options=topic_options,
+                        help="Filter by content area"
+                    )
+                else:
+                    selected_topic = "All Topics"
+            
             # Apply filters
-            filtered_qlf = student_qlf_clean.copy()
-           
+            filtered_data = attempt_data.copy()
+            
+            # Apply performance filter
             if show_filter == "Incorrect Only":
-                filtered_qlf = filtered_qlf[filtered_qlf["correct"] == 0]
+                filtered_data = filtered_data[filtered_data["correct"] == 0]
             elif show_filter == "Below National Average":
-                filtered_qlf = filtered_qlf[
-                    (filtered_qlf["correct"] == 0) &
-                    (filtered_qlf["national_pct_correct"] >= 70)
+                filtered_data = filtered_data[
+                    (filtered_data["correct"] == 0) & 
+                    (filtered_data["national_pct_correct"] >= 70)
                 ]
-           
-            if competency_filter != "All":
-                filtered_qlf = filtered_qlf[filtered_qlf["physician_competency"] == competency_filter]
-           
-            if topic_filter != "All":
-                filtered_qlf = filtered_qlf[filtered_qlf["content_topic"] == topic_filter]
-           
-            # Create display dataframe
-            if not filtered_qlf.empty:
-                display_qlf = filtered_qlf.copy()
-               
-                # Create the status column with visual indicators
-                display_qlf["Status"] = display_qlf["correct"].apply(lambda x: "✅ Correct" if x == 1 else "❌ Incorrect")
-               
-                # Create exam take column
-                display_qlf["Exam Take"] = display_qlf["exam_round"].astype(str) + " | " + display_qlf["exam_date"]
-               
-                # Performance vs national
-                display_qlf["Vs National"] = display_qlf.apply(
-                    lambda row: "Above Avg" if row["correct"] == 1 and row["national_pct_correct"] < 80
-                    else "Expected" if row["correct"] == 1
-                    else "Below Avg" if row["correct"] == 0 and row["national_pct_correct"] >= 70
-                    else "Acceptable Miss" if row["correct"] == 0 and row["national_pct_correct"] < 70
-                    else "Miss",
-                    axis=1
-                )
-               
-                # Format national percentage
-                display_qlf["National %"] = display_qlf["national_pct_correct"].apply(lambda x: f"{x:.0f}%")
-               
-                # Select and rename columns for display
-                final_display = display_qlf[[
-                    "Status", "physician_competency", "content_topic", "content_description",
-                    "National %", "Vs National", "Exam Take"
-                ]].copy()
-               
-                final_display = final_display.rename(columns={
-                    "physician_competency": "Physician Competency",
-                    "content_topic": "Content Topic",
-                    "content_description": "Content Description"
-                })
-               
-                # Sort by incorrect first, then by national percentage (high to low)
-                sort_order = display_qlf["correct"].astype(str) + display_qlf["national_pct_correct"].apply(lambda x: f"{100-x:03.0f}")
-                final_display = final_display.iloc[sort_order.argsort()]
-               
-                # Style the dataframe
-                def highlight_status(row):
-                    colors = []
-                    for col in row.index:
-                        if col == 'Status':
-                            if '❌' in str(row[col]):
-                                colors.append('background-color: #f8d7da; color: #721c24; font-weight: bold')
-                            elif '✅' in str(row[col]):
-                                colors.append('background-color: #d4edda; color: #155724; font-weight: bold')
-                            else:
-                                colors.append('')
-                        elif col == 'Vs National':
-                            if 'Below Avg' in str(row[col]):
-                                colors.append('background-color: #fff3cd; color: #856404; font-weight: bold')
-                            elif 'Above Avg' in str(row[col]):
-                                colors.append('background-color: #d1ecf1; color: #0c5460; font-weight: bold')
-                            else:
-                                colors.append('')
-                        else:
-                            colors.append('')
-                    return colors
-               
-                # Display the table
-                st.markdown(f"**Showing {len(final_display)} questions** (filtered from {total_questions} total)")
-               
-                styled_qlf = final_display.style.apply(highlight_status, axis=1)
-                st.dataframe(styled_qlf, use_container_width=True, height=400)
-               
+            
+            # Apply competency filter
+            if selected_competency != "All Competencies":
+                filtered_data = filtered_data[filtered_data["physician_competency"] == selected_competency]
+            
+            # Apply topic filter
+            if selected_topic != "All Topics":
+                filtered_data = filtered_data[filtered_data["content_topic"] == selected_topic]
+            
+            # Show filtered results count
+            if len(filtered_data) != len(attempt_data):
+                st.markdown(f"**Showing {len(filtered_data)} of {len(attempt_data)} questions**")
+            
+            # Display the detailed table (this part stays the same)
+            if not filtered_data.empty:
+                # Display table with key columns
+                display_columns = ["correct", "physician_competency", "content_topic", "content_description"]
+                if "national_pct_correct" in filtered_data.columns:
+                    display_columns.append("national_pct_correct")
                 
-               
-                # Log enhanced QLF interaction
-                log_feature_interaction(current_user, "enhanced_qlf_analysis", {
-                    "student_id": selected_id,
-                    "total_questions": total_questions,
-                    "questions_displayed": len(final_display),
-                    "filter_applied": show_filter,
-                    "competency_filter": competency_filter,
-                    "topic_filter": topic_filter,
-                    "overall_performance": overall_pct,
-                    "high_yield_missed": len(high_yield_missed)
-                })
-               
+                # Only include columns that exist
+                available_columns = [col for col in display_columns if col in filtered_data.columns]
+                
+                if available_columns:
+                    table_data = filtered_data[available_columns].copy()
+                    
+                    # Format for display
+                    if "correct" in table_data.columns:
+                        table_data["Result"] = table_data["correct"].apply(lambda x: "✅ Correct" if x == 1 else "❌ Incorrect")
+                    
+                    if "national_pct_correct" in table_data.columns:
+                        table_data["National %"] = table_data["national_pct_correct"].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
+                    
+                    # Rename columns for display
+                    column_mapping = {
+                        "physician_competency": "Physician Competency",
+                        "content_topic": "Content Topic", 
+                        "content_description": "Question Description"
+                    }
+                    
+                    table_data = table_data.rename(columns=column_mapping)
+                    
+                    # Reorder columns for better display
+                    display_order = ["Result"]
+                    if "Physician Competency" in table_data.columns:
+                        display_order.append("Physician Competency")
+                    if "Content Topic" in table_data.columns:
+                        display_order.append("Content Topic")
+                    if "Question Description" in table_data.columns:
+                        display_order.append("Question Description")
+                    if "National %" in table_data.columns:
+                        display_order.append("National %")
+                    
+                    # Only include columns that exist in the final display
+                    final_columns = [col for col in display_order if col in table_data.columns]
+                    
+                    st.dataframe(
+                        table_data[final_columns],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    # Add export option for this filtered data
+                    if st.button("📥 Export Filtered Questions"):
+                        csv_data = filtered_data.to_csv(index=False)
+                        st.download_button(
+                            label="Download Question Analysis CSV",
+                            data=csv_data,
+                            file_name=f"question_analysis_{selected_student}_{selected_attempt.replace(' ', '_') if 'selected_attempt' in locals() else 'all'}.csv",
+                            mime="text/csv"
+                        )
+                else:
+                    st.warning("No displayable columns found in the question-level data.")
             else:
-                st.info("No questions match the selected filters. Try adjusting your filter criteria.")
-               
+                st.warning(f"No questions match the selected filters.")
+                
         else:
-            st.write("No valid QLF data found after data cleaning.")
+            st.warning("No valid question-level data available after cleaning.")
     else:
-        st.write("No QLF data available.")
+        st.info("No question-level data available for this student.")
 
 # --- AT-RISK STUDENT TRIAGE ---
 elif page == "At-Risk Student Triage":
