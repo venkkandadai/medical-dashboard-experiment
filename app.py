@@ -9,6 +9,7 @@ import json
 import uuid
 import secrets
 import smtplib
+import platform
 import numpy as np  # For trend calculation
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -21,6 +22,13 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from io import BytesIO
 import threading
 import fcntl
+
+# --- CONSTANTS ---
+STEP1_READY_THRESHOLD = 66
+APPROACHING_READY_THRESHOLD = 62
+SESSION_TIMEOUT_HOURS = 1
+RESET_TOKEN_EXPIRE_SECONDS = 3600  # 1 hour
+MAX_RECENT_ACTIVITIES = 20
 
 # Set page config first
 st.set_page_config(
@@ -116,11 +124,12 @@ def log_user_action(user_email, action, details=None):
             try:
                 with analytics_lock:
                     with open(analytics_file, "a") as f:
-                        # Try to acquire file lock (Unix systems)
-                        try:
-                            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        except:
-                            pass  # Skip locking on systems that don't support it
+                        # Only use file locking on non-Windows systems
+                        if platform.system() != "Windows":
+                            try:
+                                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            except:
+                                pass  # Skip if locking fails
                         
                         f.write(json.dumps(log_entry) + "\n")
                         f.flush()  # Ensure data is written immediately
@@ -353,7 +362,7 @@ def generate_student_pdf_report(student_data, student_exams, student_epc, studen
         story.append(Spacer(1, 20))
    
     # Areas for Improvement - EPC
-    if not student_epc.empty:
+    if safe_dataframe_operation(student_epc, "EPC content area analysis"):
         story.append(Paragraph("📚 Content Areas Needing Attention (EPC)", heading_style))
        
         epc_long = student_epc.melt(id_vars=["student_id", "exam_type", "exam_date"], var_name="EPC", value_name="Score")
@@ -397,7 +406,7 @@ def generate_student_pdf_report(student_data, student_exams, student_epc, studen
         story.append(Spacer(1, 20))
    
     # Areas for Improvement - QLF
-    if not student_qlf.empty:
+    if safe_dataframe_operation(student_qlf, "question-level performance analysis"):
         story.append(Paragraph("🔍 Question-Level Performance (QLF)", heading_style))
        
         student_qlf["correct"] = pd.to_numeric(student_qlf["correct"], errors='coerce')
@@ -471,7 +480,7 @@ def generate_student_pdf_report(student_data, student_exams, student_epc, studen
                 talking_points.append(f"• **Step 1 Preparation Strategy**: Pass probability is {pass_prob:.1%} - discuss focused preparation approach")
    
     # Add content-specific talking points
-    if not student_epc.empty:
+    if safe_dataframe_operation(student_epc, "EPC content area analysis"):
         epc_long = student_epc.melt(id_vars=["student_id", "exam_type", "exam_date"], var_name="EPC", value_name="Score")
         epc_long["Score"] = pd.to_numeric(epc_long["Score"], errors='coerce')
         epc_long = epc_long.dropna(subset=["Score"]).copy()
@@ -592,7 +601,7 @@ def save_reset_token(email, token):
     tokens_df = pd.concat([tokens_df, new_token], ignore_index=True)
    
     # Clean up expired tokens (older than 1 hour)
-    one_hour_ago = current_time - 3600
+    one_hour_ago = current_time - RESET_TOKEN_EXPIRE_SECONDS
     tokens_df = tokens_df[tokens_df["timestamp"] > one_hour_ago]
    
     # Save updated tokens
@@ -607,7 +616,7 @@ def verify_reset_token(token):
    
     tokens_df = pd.read_csv(token_file)
     current_time = time.time()
-    one_hour_ago = current_time - 3600
+    one_hour_ago = current_time - RESET_TOKEN_EXPIRE_SECONDS
    
     # Find valid token
     valid_token = tokens_df[
@@ -853,12 +862,12 @@ if auth_mode == "Login":
                         
                         # Use bcrypt to verify password
                         import bcrypt
+                        # Clean authentication
                         try:
-                            # Try bcrypt verification (most common)
-                            if bcrypt.checkpw(login_password.encode('utf-8'), stored_password.encode('utf-8')):
-                                password_correct = True
-                            else:
-                                password_correct = False
+                            password_correct = bcrypt.checkpw(login_password.encode('utf-8'), stored_password.encode('utf-8'))
+                        except Exception as e:
+                            st.error("Authentication system error. Please try again.")
+                            password_correct = False
                         except:
                             # Fallback: check if it's a plain hash we can verify differently
                             test_hash = stauth.Hasher.hash(login_password)
@@ -947,10 +956,42 @@ def get_readiness_color_style(flag):
 def load_data():
     base_path = "data"
 
-    students = pd.read_csv(os.path.join(base_path, "students_master.csv"))
-    cbse = pd.read_csv(os.path.join(base_path, "cbse_summary.csv"))
-    cbssa = pd.read_csv(os.path.join(base_path, "cbssa_summary.csv"))
-    qlf = pd.read_csv(os.path.join(base_path, "cbse_qlf.csv"))
+    # Load CSV files with error handling
+    try:
+        students = pd.read_csv(os.path.join(base_path, "students_master.csv"))
+    except FileNotFoundError:
+        st.error("❌ **Critical Error**: students_master.csv not found in data folder")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ **Error loading students data**: {str(e)}")
+        st.stop()
+
+    try:
+        cbse = pd.read_csv(os.path.join(base_path, "cbse_summary.csv"))
+    except FileNotFoundError:
+        st.error("❌ **Critical Error**: cbse_summary.csv not found in data folder")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ **Error loading CBSE data**: {str(e)}")
+        st.stop()
+
+    try:
+        cbssa = pd.read_csv(os.path.join(base_path, "cbssa_summary.csv"))
+    except FileNotFoundError:
+        st.error("❌ **Critical Error**: cbssa_summary.csv not found in data folder")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ **Error loading CBSSA data**: {str(e)}")
+        st.stop()
+
+    try:
+        qlf = pd.read_csv(os.path.join(base_path, "cbse_qlf.csv"))
+    except FileNotFoundError:
+        st.error("❌ **Critical Error**: cbse_qlf.csv not found in data folder")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ **Error loading QLF data**: {str(e)}")
+        st.stop()
 
     # Initial deduplication
     cbse = cbse.loc[:, ~cbse.columns.duplicated()].copy()
@@ -982,9 +1023,9 @@ def load_data():
     cbssa = cbssa.loc[:, ~cbssa.columns.duplicated()].copy()
 
     def assign_flag(score):
-        if score >= 66:
+        if score >= STEP1_READY_THRESHOLD:
             return "Green"
-        elif score >= 62:
+        elif score >= APPROACHING_READY_THRESHOLD:
             return "Yellow"
         else:
             return "Red"
@@ -1113,6 +1154,57 @@ def load_data():
 
     return students, exam_records, epc_scores, qlf_responses
 
+# Add the helper function right here:
+def filter_by_cohorts_and_exams(data, selected_cohorts=None, selected_exams=None):
+    """Centralized filtering logic for cohorts and exams"""
+    filtered_data = data.copy()
+    
+    # Filter by cohorts
+    if selected_cohorts and len(selected_cohorts) > 0:
+        # Handle both string and list inputs
+        if isinstance(selected_cohorts, str):
+            selected_cohorts = [selected_cohorts]
+        # Convert cohort_year to int if needed for comparison
+        if 'cohort_year' in filtered_data.columns:
+            filtered_data = filtered_data[filtered_data['cohort_year'].isin([int(c) if str(c).isdigit() else c for c in selected_cohorts])]
+    
+    # Filter by exams
+    if selected_exams and len(selected_exams) > 0:
+        # Handle both string and list inputs
+        if isinstance(selected_exams, str):
+            selected_exams = [selected_exams]
+        
+        # Add exam_label if not present
+        if 'exam_label' not in filtered_data.columns and 'exam_type' in filtered_data.columns:
+            if 'exam_round' in filtered_data.columns:
+                filtered_data['exam_label'] = filtered_data['exam_type'] + " - " + filtered_data['exam_round'].astype(str).str.replace('MS', 'ME')
+            else:
+                filtered_data['exam_label'] = filtered_data['exam_type']
+        
+        # Filter by exam_label
+        if 'exam_label' in filtered_data.columns:
+            filtered_data = filtered_data[filtered_data['exam_label'].isin(selected_exams)]
+    
+    return filtered_data
+
+# Add the NEW helper functions right here:
+def safe_dataframe_operation(df, operation_name):
+    """Check if DataFrame is valid before operations"""
+    if df is None or df.empty:
+        st.warning(f"⚠️ No data available for {operation_name}")
+        return False
+    return True
+
+def safe_get_data(df, operation_name, min_rows=1):
+    """Get DataFrame safely with minimum row check"""
+    if df is None or df.empty:
+        st.warning(f"⚠️ No data available for {operation_name}")
+        return None
+    if len(df) < min_rows:
+        st.warning(f"⚠️ Insufficient data for {operation_name} (need at least {min_rows} records)")
+        return None
+    return df
+
 # Load data with error handling
 try:
     students, exam_records, epc_scores, qlf_responses = load_data()
@@ -1178,11 +1270,12 @@ def log_cla_action(user_email, action, details=None):
             try:
                 with analytics_lock:  # Reuse the same lock
                     with open(cla_analytics_file, "a") as f:
-                        # Try to acquire file lock
-                        try:
-                            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        except:
-                            pass  # Skip locking on systems that don't support it
+                        # Only use file locking on non-Windows systems
+                        if platform.system() != "Windows":
+                            try:
+                                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            except:
+                                pass  # Skip if locking fails
                         
                         f.write(json.dumps(log_entry) + "\n")
                         f.flush()  # Ensure data is written immediately
@@ -1337,6 +1430,11 @@ elif page == "Individual Student Dashboard":
     student_exams = exam_records[exam_records["student_id"] == selected_id].copy()
     student_epc = epc_scores[epc_scores["student_id"] == selected_id].copy()
     student_qlf = qlf_responses[qlf_responses["student_id"] == selected_id].copy()
+
+    # Safe data validation
+    if not safe_dataframe_operation(student_exams, f"exam data for student {selected_name}"):
+        st.error("❌ No exam data found for this student")
+        st.stop()
 
     exam_ids = student_exams[["exam_type", "exam_date"]].drop_duplicates()
    
@@ -1918,7 +2016,7 @@ if 'selected_exam_label' in locals() and selected_exam_label == "All" and 'stude
     if not qlf_responses.empty:
         student_qlf = qlf_responses[qlf_responses["student_id"] == selected_id].copy()
         
-        if not student_qlf.empty:
+        if safe_dataframe_operation(student_qlf, "question-level performance analysis"):
             # Ensure 'correct' column is numeric and clean data
             student_qlf["correct"] = pd.to_numeric(student_qlf["correct"], errors='coerce')
             student_qlf["national_pct_correct"] = pd.to_numeric(student_qlf["national_pct_correct"], errors='coerce')
@@ -1990,7 +2088,7 @@ if 'selected_exam_label' in locals() and selected_exam_label == "All" and 'stude
     # EPC
     st.subheader("📚 EPC Content Area Scores")
 
-    if not student_epc.empty:
+    if safe_dataframe_operation(student_epc, "EPC content area analysis"):
         # Identify EPC content columns more carefully
         id_vars = ["student_id", "exam_type", "exam_date"]
         if 'exam_round' in student_epc.columns:
@@ -2482,7 +2580,7 @@ if 'selected_exam_label' in locals() and selected_exam_label == "All" and 'stude
     # Enhanced QLF - Question-Level Feedback
     st.subheader("🔍 Question-Level Performance Analysis")
 
-    if not student_qlf.empty:
+    if safe_dataframe_operation(student_qlf, "question-level performance analysis"):
         # Ensure 'correct' column is numeric and clean data
         student_qlf["correct"] = pd.to_numeric(student_qlf["correct"], errors='coerce')
         student_qlf["national_pct_correct"] = pd.to_numeric(student_qlf["national_pct_correct"], errors='coerce')
@@ -2740,11 +2838,8 @@ elif page == "At-Risk Student Triage":
        
         if risk_levels:
             # Apply filtering
-            triage_data = triage_base_data.copy()
-           
-            # Apply cohort filter
-            if selected_cohort != "All Cohorts":
-                triage_data = triage_data[triage_data['cohort_year'] == int(selected_cohort)]
+            cohorts_to_filter = None if selected_cohort == "All Cohorts" else [selected_cohort]
+            triage_data = filter_by_cohorts_and_exams(triage_base_data, selected_cohorts=cohorts_to_filter)
            
             # Apply risk level filter  
             triage_data = triage_data[triage_data['flag'].isin(risk_levels)]
@@ -2945,19 +3040,9 @@ elif page == "Cohort Analytics":
         log_cohort_analysis(current_user, selected_cohorts, selected_exams)
    
     if selected_cohorts and selected_exams:
-        # Merge cohort data
-        cohort_data = exam_records.merge(students[['student_id', 'cohort_year']], on='student_id')
-        cohort_data = cohort_data[cohort_data['cohort_year'].isin(selected_cohorts)].copy()
-       
-        # Add exam labels to cohort_data using the same logic
-        if 'exam_round' in cohort_data.columns:
-            cohort_data['exam_label'] = cohort_data['exam_type'] + " - " + cohort_data['exam_round'].astype(str).str.replace('MS', 'ME')
-        else:
-            # Fallback: use exam_type only
-            cohort_data['exam_label'] = cohort_data['exam_type']
-       
-        # Filter by selected exams
-        cohort_data = cohort_data[cohort_data['exam_label'].isin(selected_exams)].copy()
+        # Merge cohort data and apply filters
+        cohort_base = exam_records.merge(students[['student_id', 'cohort_year']], on='student_id')
+        cohort_data = filter_by_cohorts_and_exams(cohort_base, selected_cohorts=selected_cohorts, selected_exams=selected_exams)
        
         if cohort_data.empty:
             st.warning("No data available for the selected cohorts and exams.")
