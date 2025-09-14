@@ -1205,9 +1205,9 @@ st.sidebar.title("🩺 Wharton Street College of Medicine Dashboard")
 current_user = st.session_state.get("username")
 # Add Compliance to navigation
 if current_user and is_admin(current_user):
-    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ CLA Analytics", "📋 Compliance", "📊 Analytics"]
+    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage",  "📋 Compliance", "📊 Analytics"]
 else:
-    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage", "🗣️ CLA Analytics"]
+    mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage"]
 
 page = st.sidebar.selectbox("Navigation", mode_options)
 
@@ -1217,102 +1217,103 @@ if current_user:
 
 # --- HOME PAGE ---
 if page == "Home":
-    st.markdown("# 🩺 Welcome to Wharton Street College of Medicine Dashboard")
-    st.markdown("## Medical Student Performance Analytics")
+    st.markdown("# 🩺 Medical Student Performance Analytics")
+    st.markdown("*Welcome to Wharton Street College of Medicine Dashboard*")
    
+    # Quick Stats (Keep these - they're useful)
     col1, col2 = st.columns([2, 1])
    
     with col1:
-        st.markdown("### 🎯 Dashboard Features")
-        st.markdown("""
-        **📊 Individual Student Dashboard**
-        - Complete exam history with performance trends
-        - Step 1 pass probability analytics
-        - Content area breakdowns (EPC & QLF)
-        - Risk flag indicators
-       
-        **🏥 Cohort Analytics**
-        - Multi-cohort performance comparisons
-        - Content area heatmaps
-        - Longitudinal trend analysis
-        - National benchmarking capabilities
-       
-        **🚨 At-Risk Student Triage**
-        - Automated risk identification
-        - Priority student lists
-        - Export capabilities for interventions
-        - Performance band analysis
-        """)
+        # Recent Activity & Key Insights
+        st.markdown("### 📊 Dashboard Overview")
+        
+        # Calculate key insights
+        if 'exam_records' in locals() and not exam_records.empty and 'students' in locals() and not students.empty:
+            # Recent activity calculations
+            recent_cutoff = pd.Timestamp.now() - pd.Timedelta(days=7)
+            recent_exams = exam_records[pd.to_datetime(exam_records['exam_date']) >= recent_cutoff]
+            recent_count = len(recent_exams)
+            
+            # At-risk insights
+            recent_assessments = exam_records.merge(students[['student_id', 'cohort_year']], on='student_id')
+            recent_assessments = recent_assessments[pd.to_datetime(recent_assessments['exam_date']) >= pd.Timestamp.now() - pd.Timedelta(days=180)]
+            at_risk_count = len(recent_assessments[recent_assessments['flag'] == 'Red'])
+            ready_count = len(recent_assessments[recent_assessments['flag'] == 'Green'])
+            
+            # Display insights
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                st.metric("📅 Recent Activity", f"{recent_count} exams", help="Exams in the last 7 days")
+                st.metric("🚨 Need Intervention", at_risk_count, help="Students flagged for immediate support")
+            
+            with col_b:
+                st.metric("✅ Step 1 Ready", ready_count, help="Students ready for Step 1 exam")
+                last_updated = exam_records['exam_date'].max() if not exam_records.empty else "No data"
+                st.metric("🔄 Last Updated", last_updated, help="Most recent exam data")
+        
+        else:
+            st.info("📊 Dashboard insights will appear when data is loaded")
+        
+        # Navigation Guide Cards
+        st.markdown("### 🚀 Next Steps")
+        
+        col_x, col_y, col_z = st.columns(3)
+        
+        with col_x:
+            st.info("🔍 **At-Risk Triage**\n\nIdentify students needing immediate intervention")
+        
+        with col_y:
+            st.info("👤 **Individual Student**\n\nDetailed performance analysis for advising")
+        
+        with col_z:
+            st.info("📈 **Cohort Analytics**\n\nCompare performance across classes")
+        
+        # Current Status Summary
+        st.markdown("### 📋 Current Status")
+        st.info("💡 **Getting Started**: Select a view from the navigation menu to begin analyzing student performance data.")
    
     with col2:
         st.markdown("### 📈 Quick Stats")
-        if 'students' in st.session_state:
-            students_data = st.session_state['students']
-            st.metric("👥 Total Students", len(students_data))
-           
-            # Get cohort info
-            cohorts = sorted(students_data['cohort_year'].unique())
-            st.metric("📚 Cohorts", f"{len(cohorts)} cohorts")
-            st.metric("📅 Years", f"{min(cohorts)}-{max(cohorts)}")
-       
-    # Display user profile information
-    if authentication_status and username:
+        
+        # Keep the existing Quick Stats logic
+        if 'students' in locals() and not students.empty:
+            total_students = len(students)
+            st.metric("👥 Total Students", total_students)
+            
+            # Cohort info
+            cohorts = sorted(students['cohort_year'].unique())
+            cohort_range = f"{min(cohorts)}-{max(cohorts)}" if len(cohorts) > 1 else str(cohorts[0])
+            st.metric("🎓 Cohorts", f"{len(cohorts)} cohorts")
+            st.metric("📅 Years", cohort_range)
+            
+            # Exam data stats
+            if 'exam_records' in locals() and not exam_records.empty:
+                total_exams = len(exam_records)
+                st.metric("📝 Total Exams", total_exams)
+                
+                # Performance distribution
+                if 'flag' in exam_records.columns:
+                    flag_counts = exam_records['flag'].value_counts()
+                    
+                    # Create simple performance indicator
+                    if 'Green' in flag_counts:
+                        ready_pct = (flag_counts.get('Green', 0) / len(exam_records)) * 100
+                        st.metric("🎯 Step 1 Ready", f"{ready_pct:.1f}%")
+            
+        else:
+            st.info("📊 Stats will load with data")
+            
+        # System Status
         st.markdown("---")
-        user_info = users_df[users_df["email"] == username].iloc[0]
-        st.subheader("👤 Your Profile")
-        col1, col2 = st.columns(2)
-       
-        with col1:
-            if user_info.get('first_name') and user_info.get('last_name'):
-                st.write(f"**Name:** {user_info['first_name']} {user_info['last_name']}")
-            elif user_info.get('name'):
-                st.write(f"**Name:** {user_info['name']}")
-            st.write(f"**Email:** {user_info['email']}")
-       
-        with col2:
-            if user_info.get('title'):
-                st.write(f"**Title:** {user_info['title']}")
-            if user_info.get('medical_school'):
-                st.write(f"**Medical School:** {user_info['medical_school']}")
-       
-        # Log profile view
-        log_feature_interaction(username, "profile_view", {
-            "has_title": bool(user_info.get('title')),
-            "has_medical_school": bool(user_info.get('medical_school'))
-        })
-       
-        # Admin quick stats (only for admins)
-        if is_admin(username):
-            st.markdown("---")
-            st.subheader("🔧 Admin Quick Stats")
-           
-            # Load basic analytics for quick view
-            analytics_file = "experiment_analytics.json"
-            if os.path.exists(analytics_file):
-                try:
-                    with open(analytics_file, "r") as f:
-                        line_count = sum(1 for _ in f)
-                   
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        user_count = len(users_df)
-                        st.metric("👥 Total Users", user_count)
-                    with col2:
-                        st.metric("📊 Total Actions", line_count)
-                    with col3:
-                        st.info("📈 View full analytics in Analytics tab")
-                       
-                    # Show data status for admin
-                    if st.session_state.get('data_loaded', False):
-                        students_data = st.session_state['students']
-                        st.success(f"✅ Dashboard data: {len(students_data)} students loaded")
-                    else:
-                        st.warning("⚠️ Dashboard data not loaded")
-                       
-                except Exception as e:
-                    st.info("📊 Analytics data will appear as users interact with the dashboard")
-            else:
-                st.info("📊 Analytics data will appear as users interact with the dashboard")
+        st.markdown("**🟢 System Status**")
+        st.success("Dashboard Online")
+        
+        # Help/Tips
+        st.markdown("**💡 Quick Tips:**")
+        st.markdown("• Use **Individual Student** for advising meetings")
+        st.markdown("• Use **Cohort Analytics** for curriculum review")
+        st.markdown("• Use **At-Risk Triage** for intervention planning")
 
 # --- INDIVIDUAL STUDENT DASHBOARD ---
 elif page == "Individual Student Dashboard":
