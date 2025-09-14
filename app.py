@@ -1303,6 +1303,7 @@ else:
     mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage"]
 
 page = st.sidebar.selectbox("Navigation", mode_options)
+st.write(f"DEBUG: Current page is '{page}'")  # Add this temporarily
 
 # Log page navigation
 if current_user:
@@ -1312,101 +1313,136 @@ if current_user:
 if page == "Home":
     st.markdown("# 🩺 Medical Student Performance Analytics")
     st.markdown("*Welcome to Wharton Street College of Medicine Dashboard*")
+    
+    # Navigation orientation
+    st.info("👈 **New here?** Use the navigation menu on the left sidebar to explore different dashboard features, or see the overview below.")
    
-    # Quick Stats (Keep these - they're useful)
-    col1, col2 = st.columns([2, 1])
-   
-    with col1:
-        # Recent Activity & Key Insights
-        st.markdown("### 📊 Dashboard Overview")
+    # Quick overview metrics in a single row
+    if 'exam_records' in locals() and not exam_records.empty and 'students' in locals() and not students.empty:
+        # Calculate key metrics
+        total_students = len(students)
+        recent_assessments = exam_records.merge(students[['student_id', 'cohort_year']], on='student_id')
+        recent_assessments = recent_assessments[pd.to_datetime(recent_assessments['exam_date']) >= pd.Timestamp.now() - pd.Timedelta(days=180)]
         
-        # Calculate key insights
-        if 'exam_records' in locals() and not exam_records.empty and 'students' in locals() and not students.empty:
-            # Recent activity calculations
-            recent_cutoff = pd.Timestamp.now() - pd.Timedelta(days=7)
-            recent_exams = exam_records[pd.to_datetime(exam_records['exam_date']) >= recent_cutoff]
-            recent_count = len(recent_exams)
-            
-            # At-risk insights
-            recent_assessments = exam_records.merge(students[['student_id', 'cohort_year']], on='student_id')
-            recent_assessments = recent_assessments[pd.to_datetime(recent_assessments['exam_date']) >= pd.Timestamp.now() - pd.Timedelta(days=180)]
-            at_risk_count = len(recent_assessments[recent_assessments['flag'] == 'Red'])
-            ready_count = len(recent_assessments[recent_assessments['flag'] == 'Green'])
-            
-            # Display insights
-            col_a, col_b = st.columns(2)
-            
-            with col_a:
-                st.metric("📅 Recent Activity", f"{recent_count} exams", help="Exams in the last 7 days")
-                st.metric("🚨 Need Intervention", at_risk_count, help="Students flagged for immediate support")
-            
-            with col_b:
-                st.metric("✅ Step 1 Ready", ready_count, help="Students ready for Step 1 exam")
-                last_updated = exam_records['exam_date'].max() if not exam_records.empty else "No data"
-                st.metric("🔄 Last Updated", last_updated, help="Most recent exam data")
+        ready_count = len(recent_assessments[recent_assessments['flag'] == 'Green'])
+        at_risk_count = len(recent_assessments[recent_assessments['flag'] == 'Red'])
+        approaching_count = len(recent_assessments[recent_assessments['flag'] == 'Yellow'])
         
-        else:
-            st.info("📊 Dashboard insights will appear when data is loaded")
+        # Single row of key metrics
+        col1, col2, col3, col4 = st.columns(4)
         
-        # Navigation Guide Cards
-        st.markdown("### 🚀 Next Steps")
-        
-        col_x, col_y, col_z = st.columns(3)
-        
-        with col_x:
-            st.info("🔍 **At-Risk Triage**\n\nIdentify students needing immediate intervention")
-        
-        with col_y:
-            st.info("👤 **Individual Student**\n\nDetailed performance analysis for advising")
-        
-        with col_z:
-            st.info("📈 **Cohort Analytics**\n\nCompare performance across classes")
-        
-        # Current Status Summary
-        st.markdown("### 📋 Current Status")
-        st.info("💡 **Getting Started**: Select a view from the navigation menu to begin analyzing student performance data.")
-   
-    with col2:
-        st.markdown("### 📈 Quick Stats")
-        
-        # Keep the existing Quick Stats logic
-        if 'students' in locals() and not students.empty:
-            total_students = len(students)
+        with col1:
             st.metric("👥 Total Students", total_students)
-            
-            # Cohort info
-            cohorts = sorted(students['cohort_year'].unique())
-            cohort_range = f"{min(cohorts)}-{max(cohorts)}" if len(cohorts) > 1 else str(cohorts[0])
-            st.metric("🎓 Cohorts", f"{len(cohorts)} cohorts")
-            st.metric("📅 Years", cohort_range)
-            
-            # Exam data stats
-            if 'exam_records' in locals() and not exam_records.empty:
-                total_exams = len(exam_records)
-                st.metric("📝 Total Exams", total_exams)
-                
-                # Performance distribution
-                if 'flag' in exam_records.columns:
-                    flag_counts = exam_records['flag'].value_counts()
-                    
-                    # Create simple performance indicator
-                    if 'Green' in flag_counts:
-                        ready_pct = (flag_counts.get('Green', 0) / len(exam_records)) * 100
-                        st.metric("🎯 Step 1 Ready", f"{ready_pct:.1f}%")
-            
-        else:
-            st.info("📊 Stats will load with data")
-            
-        # System Status
-        st.markdown("---")
-        st.markdown("**🟢 System Status**")
-        st.success("Dashboard Online")
         
-        # Help/Tips
-        st.markdown("**💡 Quick Tips:**")
-        st.markdown("• Use **Individual Student** for advising meetings")
-        st.markdown("• Use **Cohort Analytics** for curriculum review")
-        st.markdown("• Use **At-Risk Triage** for intervention planning")
+        with col2:
+            ready_pct = (ready_count / len(recent_assessments)) * 100 if len(recent_assessments) > 0 else 0
+            st.metric("✅ Step 1 Ready", f"{ready_pct:.1f}%", 
+                     delta=f"{ready_count} students")
+        
+        with col3:
+            approaching_pct = (approaching_count / len(recent_assessments)) * 100 if len(recent_assessments) > 0 else 0
+            st.metric("⚠️ Approaching Ready", f"{approaching_pct:.1f}%", 
+                     delta=f"{approaching_count} students")
+        
+        with col4:
+            at_risk_pct = (at_risk_count / len(recent_assessments)) * 100 if len(recent_assessments) > 0 else 0
+            st.metric("🚨 Need Intervention", f"{at_risk_pct:.1f}%", 
+                     delta=f"{at_risk_count} students")
+    
+    st.markdown("---")
+    
+    # Primary action cards - larger and more prominent
+    st.markdown("## 🎯 Quick Start (or use sidebar menu ←)")
+    st.caption("Choose an analysis below or select any option from the navigation menu on the left")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        with st.container():
+            st.markdown("""
+            ### 👤 Individual Student
+            **Perfect for advisor meetings**
+            
+            - Detailed performance analysis
+            - Generate meeting prep reports  
+            - Track learning progression
+            - Identify specific intervention needs
+            """)
+            st.markdown("👈 *Select 'Individual Student Dashboard' from the sidebar menu*")
+    
+    with col2:
+        with st.container():
+            st.markdown("""
+            ### 🚨 At-Risk Triage
+            **Immediate intervention planning**
+            
+            - Identify students below threshold
+            - Export intervention lists
+            - Prioritize academic support
+            - Track readiness trends
+            """)
+            st.markdown("👈 *Select 'At-Risk Student Triage' from the sidebar menu*")
+    
+    with col3:
+        with st.container():
+            st.markdown("""
+            ### 📊 Cohort Analytics
+            **Curriculum & program evaluation**
+            
+            - Compare cohort performance
+            - Content area analysis
+            - Learning trajectory tracking
+            - Program effectiveness metrics
+            """)
+            st.markdown("👈 *Select 'Cohort Analytics' from the sidebar menu*")
+    
+    st.markdown("---")
+    
+    # Secondary information - condensed
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        if 'at_risk_count' in locals() and at_risk_count > 0:
+            st.warning(f"⚠️ **{at_risk_count} students** currently need immediate academic intervention")
+            st.info("👈 Select 'At-Risk Student Triage' from the sidebar menu to view the full list!")
+        else:
+            st.success("✅ No students currently flagged for immediate intervention")
+    
+    with col2:
+        # Compact system info
+        with st.expander("ℹ️ System Info"):
+            if 'students' in locals() and not students.empty:
+                cohorts = sorted(students['cohort_year'].unique())
+                cohort_range = f"{min(cohorts)}-{max(cohorts)}" if len(cohorts) > 1 else str(cohorts[0])
+                
+                st.markdown(f"""
+                **📚 Data Summary**
+                - **Cohorts:** {len(cohorts)} ({cohort_range})
+                - **Total Exams:** {len(exam_records):,}
+                - **Last Updated:** {exam_records['exam_date'].max() if not exam_records.empty else 'No data'}
+                """)
+            
+            st.markdown("**🟢 Status:** Dashboard Online")
+    
+    # Quick tips at bottom
+    with st.expander("💡 Quick Start Tips"):
+        st.markdown("""
+        **🧭 How to Navigate:**
+        - Use the **sidebar menu** (←) to access all dashboard features
+        - Your current page is always highlighted in the sidebar
+        
+        **👥 For Academic Advisors:**
+        - Use **Individual Student** before advisor meetings
+        - Generate PDF reports for documentation
+        
+        **📊 For Program Directors:**
+        - Use **At-Risk Triage** for intervention planning
+        - Use **Cohort Analytics** for curriculum review
+        
+        **🔒 For Administrators:**
+        - Access **Compliance** reports for LCME documentation
+        - View **Analytics** for usage insights (admin only)
+        """)
 
 # --- INDIVIDUAL STUDENT DASHBOARD ---
 elif page == "Individual Student Dashboard":
@@ -5463,4 +5499,4 @@ elif page == "📊 Analytics" and is_admin(current_user):
             st.info("No feature-specific analytics to export yet")
 
 else:
-    st.error("Access denied. Page not found or insufficient permissions.")
+    st.error("Please select a page from the sidebar menu.") # Temporaily removed bug: "Access denied. Page not found or insufficient permissions."
