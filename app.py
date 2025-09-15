@@ -1303,7 +1303,6 @@ else:
     mode_options = ["Home", "Individual Student Dashboard", "Cohort Analytics", "At-Risk Student Triage"]
 
 page = st.sidebar.selectbox("Navigation", mode_options)
-st.write(f"DEBUG: Current page is '{page}'")  # Add this temporarily
 
 # Log page navigation
 if current_user:
